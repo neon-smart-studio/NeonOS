@@ -1,6 +1,10 @@
 # NeonOS
 基於 Yocto 開發之智慧家庭中樞 NeonOS
 
+在開始前請開啟系統支援en_US.UTF-8
+sudo locale-gen en_US.UTF-8
+sudo update-locale LANG=en_US.UTF-8
+
 進入目錄
 cd NeonOS
 
