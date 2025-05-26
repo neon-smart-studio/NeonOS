@@ -11,6 +11,7 @@ nano build/conf/local.conf
 新增現有layer
 source oe-init-build-env ./build
 ex: bitbake-layers add-layer ./meta-openembedded/meta-networking
+
 或是也可以
 git clone -b dunfell https://git.openembedded.org/meta-openembedded
 
