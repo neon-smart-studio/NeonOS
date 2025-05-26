@@ -38,8 +38,8 @@ BBLAYERS ?= " \
 "
 
 編譯
-cd build
-
+bitbake core-image-minimal -c clean //可選:清除快取
+bitbake core-image-minimal -c cleanall //可選:清除快取與編譯好的原始碼
 bitbake core-image-minimal
 
 最後在以下目錄可以找到image
