@@ -11,7 +11,8 @@ nano build/conf/local.conf
 新增現有layer
 source oe-init-build-env ./build
 ex: bitbake-layers add-layer ./meta-openembedded/meta-networking
-或是git clone -b dunfell https://git.openembedded.org/meta-openembedded
+或是也可以
+git clone -b dunfell https://git.openembedded.org/meta-openembedded
 
 新增自訂layer
 bitbake-layers create-layer ../<你的名稱>
@@ -19,7 +20,7 @@ nano meta-neon/conf/layer.conf
 
 修改layers目錄
 nano build/conf/bblayers.conf
-類似
+類似這樣
 BBLAYERS ?= " \
   ${TOPDIR}/../poky/meta \
   ${TOPDIR}/../poky/meta-poky \
@@ -33,4 +34,5 @@ BBLAYERS ?= " \
 
 編譯
 cd build
+
 bitbake core-image-minimal
