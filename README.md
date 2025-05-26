@@ -47,4 +47,5 @@ bitbake core-image-neonos
 最後在以下目錄可以找到image
 
 build/tmp-glibc/deploy/images/<你的架構>/core-image-minimal-<你的架構>-X.rootfs.wic.bz2/
+build/tmp-glibc/deploy/images/<你的架構>/core-image-neonos-<你的架構>-X.rootfs.wic.bz2/ //最小系統
 解壓縮就能透過win32DislImager燒進去emmc/SD
