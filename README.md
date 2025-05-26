@@ -39,4 +39,5 @@ cd build
 bitbake core-image-minimal
 
 最後在以下目錄可以找到image
+
 build/tmp/deploy/images/<你的架構>/
