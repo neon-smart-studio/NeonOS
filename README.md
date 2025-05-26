@@ -37,10 +37,11 @@ BBLAYERS ?= " \
   ${TOPDIR}/../meta-neon \
 "
 
-編譯
+編譯(最小化-可選)
 bitbake core-image-minimal -c clean //可選:清除快取
 bitbake core-image-minimal -c cleanall //可選:清除快取與編譯好的原始碼
 bitbake core-image-minimal
+編譯NeonOS Image
 bitbake core-image-neonos
 
 最後在以下目錄可以找到image
