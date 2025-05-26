@@ -17,6 +17,20 @@ ex: bitbake-layers add-layer ./meta-openembedded/meta-networking
 bitbake-layers create-layer ../<你的名稱>
 nano meta-neon/conf/layer.conf
 
+修改layers目錄
+nano build/conf/bblayers.conf
+類似
+BBLAYERS ?= " \
+  ${TOPDIR}/../poky/meta \
+  ${TOPDIR}/../poky/meta-poky \
+  ${TOPDIR}/../poky/meta-yocto-bsp \
+  ${TOPDIR}/../meta-openembedded/meta-oe \
+  ${TOPDIR}/../meta-openembedded/meta-networking \
+  ${TOPDIR}/../meta-openembedded/meta-python \
+  ${TOPDIR}/../meta-raspberrypi \
+  ${TOPDIR}/../meta-neon \
+"
+
 編譯
 cd build
 bitbake core-image-minimal
