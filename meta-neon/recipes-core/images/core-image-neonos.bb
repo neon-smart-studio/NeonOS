@@ -30,9 +30,6 @@ neon_ap_install() {
     install -d ${IMAGE_ROOTFS}/etc/systemd/system/multi-user.target.wants
     ln -sf ../ap-mode.service ${IMAGE_ROOTFS}/etc/systemd/system/multi-user.target.wants/ap-mode.service
 
-    install -d ${IMAGE_ROOTFS}/etc/hostapd
-    install -m 0644 ${THISDIR}/files/hostapd.conf ${IMAGE_ROOTFS}/etc/hostapd/hostapd.conf
-
     install -d ${IMAGE_ROOTFS}/etc/systemd/network
     install -m 0644 ${THISDIR}/files/wlan0.network ${IMAGE_ROOTFS}/etc/systemd/network/wlan0.network
 
