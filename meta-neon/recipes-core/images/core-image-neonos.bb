@@ -6,6 +6,7 @@ inherit core-image
 IMAGE_FEATURES += "ssh-server-openssh"
 
 IMAGE_INSTALL += " \
+    nano \
     bash \
     openssh \
     dnsmasq \
