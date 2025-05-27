@@ -7,13 +7,13 @@ sudo update-locale LANG=en_US.UTF-8
 
 進入目錄
 cd NeonOS
+source oe-init-build-env ./build
 
 修改編譯平台
 nano build/conf/local.conf
 選raspberrypi4-64
 
 新增現有layer
-source oe-init-build-env ./build
 ex: bitbake-layers add-layer ./meta-openembedded/meta-networking
 
 或是也可以
