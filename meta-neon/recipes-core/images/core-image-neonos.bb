@@ -17,6 +17,7 @@ IMAGE_INSTALL += " \
     sudo \
     htop \
     iw \
+    nodejs \
 "
 
 ROOTFS_POSTPROCESS_COMMAND += "neon_ap_install;"
