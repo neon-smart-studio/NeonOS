@@ -17,7 +17,7 @@ nano build/conf/local.conf
 ex: bitbake-layers add-layer ./meta-openembedded/meta-networking
 
 或是也可以
-git clone -b dunfell https://git.openembedded.org/meta-openembedded
+git clone -b <分支ex dunfell/kirkstone> https://git.openembedded.org/meta-openembedded
 
 新增自訂layer
 bitbake-layers create-layer ../<你的名稱>
