@@ -4,16 +4,16 @@ key-presses."
 HOMEPAGE = "http://matchbox-project.org/"
 BUGTRACKER = "http://bugzilla.yoctoproject.org/"
 
-LICENSE = "LGPLv2+"
+LICENSE = "LGPL-2.0-or-later"
 LIC_FILES_CHKSUM = "file://src/libfakekey.c;endline=30;md5=602b5ccd48f64407510867f3373b448c"
 
 DEPENDS = "libxtst"
 SECTION = "x11/wm"
 
 SRCREV = "7ad885912efb2131e80914e964d5e635b0d07b40"
-PV = "0.3+git${SRCPV}"
+PV = "0.3+git"
 
-SRC_URI = "git://git.yoctoproject.org/${BPN};branch=master"
+SRC_URI = "git://git.yoctoproject.org/${BPN};branch=master;protocol=https"
 
 S = "${WORKDIR}/git"
 

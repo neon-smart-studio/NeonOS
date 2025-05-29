@@ -1,4 +1,6 @@
 #
+# Copyright OpenEmbedded Contributors
+#
 # SPDX-License-Identifier: MIT
 #
 # Enable other layers to have modules in the same named directory
@@ -43,28 +45,12 @@ def make_logger_bitbake_compatible(logger):
     import logging
 
     """ 
-        Bitbake logger redifines debug() in order to
-        set a level within debug, this breaks compatibility
-        with vainilla logging, so we neeed to redifine debug()
-        method again also add info() method with INFO + 1 level.
+    We need to raise the log level of the info output so unittest 
+    messages are visible on the console.
     """
-    def _bitbake_log_debug(*args, **kwargs):
-        lvl = logging.DEBUG
-
-        if isinstance(args[0], int):
-            lvl = args[0]
-            msg = args[1]
-            args = args[2:]
-        else:
-            msg = args[0]
-            args = args[1:]
-
-        logger.log(lvl, msg, *args, **kwargs)
-    
     def _bitbake_log_info(msg, *args, **kwargs):
         logger.log(logging.INFO + 1, msg, *args, **kwargs)
 
-    logger.debug = _bitbake_log_debug
     logger.info = _bitbake_log_info
 
     return logger
@@ -104,3 +90,10 @@ def load_test_components(logger, executor):
                                 "_executor_class defined." % (comp_name, comp_context))
 
     return components
+
+def get_json_result_dir(d):
+    json_result_dir = os.path.join(d.getVar("LOG_DIR"), 'oeqa')
+    custom_json_result_dir = d.getVar("OEQA_JSON_RESULT_DIR")
+    if custom_json_result_dir:
+        json_result_dir = custom_json_result_dir
+    return json_result_dir

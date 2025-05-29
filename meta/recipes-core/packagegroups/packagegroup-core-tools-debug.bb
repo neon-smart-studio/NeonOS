@@ -8,15 +8,14 @@ PACKAGE_ARCH = "${TUNE_PKGARCH}"
 
 inherit packagegroup
 
-PR = "r3"
 
 MTRACE = ""
-MTRACE_libc-glibc = "libc-mtrace"
+MTRACE:libc-glibc = "libc-mtrace"
 
 STRACE = "strace"
-STRACE_riscv32 = ""
+STRACE:riscv32 = ""
 
-RDEPENDS_${PN} = "\
+RDEPENDS:${PN} = "\
     gdb \
     gdbserver \
     ${MTRACE} \

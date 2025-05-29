@@ -4,17 +4,16 @@
 require musl.inc
 inherit linuxloader
 
-SRCREV = "040c1d16b468c50c04fc94edff521f1637708328"
+SRCREV = "79bdacff83a6bd5b70ff5ae5eb8b6de82c2f7c30"
 
-BASEVER = "1.2.0"
+BASEVER = "1.2.4"
 
-PV = "${BASEVER}+git${SRCPV}"
+PV = "${BASEVER}+git"
 
-# mirror is at git://github.com/kraj/musl.git
-
-SRC_URI = "git://git.musl-libc.org/musl;branch=master \
+SRC_URI = "git://git.etalabs.net/git/musl;branch=master;protocol=https \
            file://0001-Make-dynamic-linker-a-relative-symlink-to-libc.patch \
            file://0002-ldso-Use-syslibdir-and-libdir-as-default-pathes-to-l.patch \
+           file://0003-elf.h-add-typedefs-for-Elf64_Relr-and-Elf32_Relr.patch \
           "
 
 S = "${WORKDIR}/git"
@@ -41,7 +40,7 @@ LDFLAGS += "-Wl,-soname,libc.so"
 # disabled automatically due to the optimisation level, but append an explicit
 # -fomit-frame-pointer to handle cases where optimisation is set to -O0 or frame
 # pointers have been enabled by -fno-omit-frame-pointer earlier in CFLAGS, etc.
-CFLAGS_append_arm = " ${@bb.utils.contains('TUNE_CCARGS', '-mthumb', '-fomit-frame-pointer', '', d)}"
+CFLAGS:append:arm = " ${@bb.utils.contains('TUNE_CCARGS', '-mthumb', '-fomit-frame-pointer', '', d)}"
 
 CONFIGUREOPTS = " \
     --prefix=${prefix} \
@@ -49,7 +48,7 @@ CONFIGUREOPTS = " \
     --bindir=${bindir} \
     --libdir=${libdir} \
     --includedir=${includedir} \
-    --syslibdir=/lib \
+    --syslibdir=${nonarch_base_libdir} \
 "
 
 do_configure() {
@@ -62,28 +61,26 @@ do_compile() {
 
 do_install() {
 	oe_runmake install DESTDIR='${D}'
-	install -d ${D}${bindir} ${D}${base_libdir} ${D}${sysconfdir}
+	install -d ${D}${bindir} ${D}${sysconfdir}
         echo "${base_libdir}" > ${D}${sysconfdir}/ld-musl-${MUSL_LDSO_ARCH}.path
         echo "${libdir}" >> ${D}${sysconfdir}/ld-musl-${MUSL_LDSO_ARCH}.path
 	rm -f ${D}${bindir}/ldd ${D}${GLIBC_LDSO}
-	lnr ${D}${libdir}/libc.so ${D}${bindir}/ldd
-	lnr ${D}${libdir}/libc.so ${D}${GLIBC_LDSO}
+	ln -rs ${D}${libdir}/libc.so ${D}${bindir}/ldd
 }
 
-PACKAGES =+ "${PN}-glibc-compat"
-
-FILES_${PN} += "/lib/ld-musl-${MUSL_LDSO_ARCH}.so.1 ${sysconfdir}/ld-musl-${MUSL_LDSO_ARCH}.path"
-FILES_${PN}-glibc-compat += "${GLIBC_LDSO}"
-FILES_${PN}-staticdev = "${libdir}/libc.a"
-FILES_${PN}-dev =+ "${libdir}/libcrypt.a ${libdir}/libdl.a ${libdir}/libm.a \
+FILES:${PN} += "${nonarch_base_libdir}/ld-musl-${MUSL_LDSO_ARCH}.so.1 ${sysconfdir}/ld-musl-${MUSL_LDSO_ARCH}.path"
+FILES:${PN}-staticdev = "${libdir}/libc.a"
+FILES:${PN}-dev =+ "${libdir}/libcrypt.a ${libdir}/libdl.a ${libdir}/libm.a \
                     ${libdir}/libpthread.a ${libdir}/libresolv.a \
                     ${libdir}/librt.a ${libdir}/libutil.a ${libdir}/libxnet.a \
                    "
 
-RDEPENDS_${PN}-dev += "linux-libc-headers-dev bsd-headers-dev libssp-nonshared-staticdev"
-RPROVIDES_${PN}-dev += "libc-dev virtual-libc-dev"
-RPROVIDES_${PN} += "ldd libsegfault rtld(GNU_HASH)"
+RDEPENDS:${PN}-dev += "linux-libc-headers-dev bsd-headers-dev libssp-nonshared-staticdev"
+RPROVIDES:${PN}-dev += "libc-dev virtual-libc-dev"
+RPROVIDES:${PN} += "ldd rtld(GNU_HASH)"
 
 LEAD_SONAME = "libc.so"
-INSANE_SKIP_${PN}-dev = "staticdev"
-INSANE_SKIP_${PN} = "libdir"
+INSANE_SKIP:${PN}-dev = "staticdev"
+INSANE_SKIP:${PN} = "libdir"
+
+UPSTREAM_CHECK_COMMITS = "1"

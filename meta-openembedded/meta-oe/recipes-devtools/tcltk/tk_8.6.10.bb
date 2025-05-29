@@ -3,7 +3,7 @@ HOMEPAGE = "http://tcl.sourceforge.net"
 SECTION = "devel/tcltk"
 
 # http://www.tcl.tk/software/tcltk/license.html
-LICENSE = "tcl"
+LICENSE = "TCL"
 LIC_FILES_CHKSUM = "file://${S}/../license.terms;md5=c88f99decec11afa967ad33d314f87fe \
     file://${S}/../compat/license.terms;md5=c88f99decec11afa967ad33d314f87fe \
     file://${S}/../doc/license.terms;md5=c88f99decec11afa967ad33d314f87fe \
@@ -28,11 +28,15 @@ SRC_URI[sha256sum] = "63df418a859d0a463347f95ded5cd88a3dd3aaa1ceecaeee362194bc30
 
 S = "${WORKDIR}/${BPN}${PV}/unix"
 
+DEBUG_PREFIX_MAP += "-fdebug-prefix-map=${S}/../=${TARGET_DBGSRC_DIR}/.."
+
+PSEUDO_IGNORE_PATHS .= ",${WORKDIR}/${BPN}${PV}"
+
 # Short version format: "8.6"
 VER = "${@os.path.splitext(d.getVar('PV'))[0]}"
 
 LDFLAGS += "-Wl,-rpath,${libdir}/tcltk/${PV}/lib"
-inherit autotools features_check
+inherit autotools features_check pkgconfig
 # depends on virtual/libx11
 REQUIRED_DISTRO_FEATURES = "x11"
 
@@ -43,7 +47,7 @@ EXTRA_OECONF = "\
     --libdir=${libdir} \
 "
 export TK_LIBRARY='${libdir}/tk${VER}'
-do_install_append() {
+do_install:append() {
     ln -sf libtk${VER}.so ${D}${libdir}/libtk${VER}.so.0
     oe_libinstall -so libtk${VER} ${D}${libdir}
     ln -sf wish${VER} ${D}${bindir}/wish
@@ -60,12 +64,12 @@ PACKAGECONFIG[xss] = "--enable-xss,--disable-xss,libxscrnsaver libxext"
 
 PACKAGES =+ "${PN}-lib"
 
-FILES_${PN}-lib = "${libdir}/libtk${VER}.so*"
-FILES_${PN} += "${libdir}/tk*"
+FILES:${PN}-lib = "${libdir}/libtk${VER}.so*"
+FILES:${PN} += "${libdir}/tk*"
 
 # isn't getting picked up by shlibs code
-RDEPENDS_${PN} += "tk-lib"
-RDEPENDS_${PN}_class-native = ""
+RDEPENDS:${PN} += "tk-lib"
+RDEPENDS:${PN}:class-native = ""
 
 BBCLASSEXTEND = "native nativesdk"
 

@@ -15,13 +15,14 @@ SRC_URI += " \
 	file://run-ptest \
 "
 
-RDEPENDS_${PN} += " \
-    ${PYTHON_PN}-datetime \
-    ${PYTHON_PN}-stringold \
+RDEPENDS:${PN} += " \
+    python3-datetime \
+    python3-stringold \
     "
 
-RDEPENDS_${PN}-ptest += " \
-	${PYTHON_PN}-pytest \
+RDEPENDS:${PN}-ptest += " \
+    python3-pytest \
+    python3-unittest-automake-output \
 "
 
 do_install_ptest() {

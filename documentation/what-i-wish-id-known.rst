@@ -27,11 +27,11 @@ contact us with other suggestions.
    to be responsible for your own updates.
 
 #. **Get to know the layer index:**
-   All layers can be found in the `layer index
-   <https://layers.openembedded.org/>`_. Layers which have applied for Yocto
-   Project Compatible status (structure continuity assurance and testing) can be
-   found in the :yocto_home:`Yocto Project Compatible index
-   </software-over/layer/>`.  Generally check the Compatible layer index first,
+   All layers can be found in the :oe_layerindex:`layer index <>`. Layers which
+   have applied for Yocto Project Compatible status (structure continuity
+   assurance and testing) can be found in the :yocto_home:`Yocto Project
+   Compatible Layers </development/yocto-project-compatible-layers/>` page.
+   Generally check the Compatible layer index first,
    and if you don't find the necessary layer check the general layer index. The
    layer index is an original artifact from the Open Embedded Project. As such,
    that index doesn't have the curating and testing that the Yocto Project
@@ -49,7 +49,7 @@ contact us with other suggestions.
    their silicon. These layers have names such as "meta-intel" or "meta-ti". Try
    not to build layers from scratch. If you do have custom silicon, use one of
    these layers as a guide or template and familiarize yourself with the
-   :doc:`bsp-guide/bsp-guide`.
+   :doc:`bsp-guide/index`.
 
 #. **Do not put everything into one layer:**
    Use different layers to logically separate information in your build. As an
@@ -99,6 +99,7 @@ contact us with other suggestions.
    be going wrong.
 
    .. image:: figures/yp-how-it-works-new-diagram.png
+      :width: 100%
 
 #. **Know that you can generate a dependency graph and learn how to do it:**
    A dependency graph shows dependencies between recipes, tasks, and targets.
@@ -126,16 +127,16 @@ contact us with other suggestions.
    You can build and run a specific task for a specific package (including
    devshell) or even a single recipe. When developers first start using the
    Yocto Project, the instructions found in the
-   :doc:`brief-yoctoprojectqs/brief-yoctoprojectqs` show how to create an image
+   :doc:`brief-yoctoprojectqs/index` show how to create an image
    and then run or flash that image.  However, you can actually build just a
    single recipe. Thus, if some dependency or recipe isn't working, you can just
    say "bitbake foo" where "foo" is the name for a specific recipe.  As you
    become more advanced using the Yocto Project, and if builds are failing, it
    can be useful to make sure the fetch itself works as desired. Here are some
-   valuable links: :ref:`dev-manual/dev-manual-common-tasks:Using a Development
+   valuable links: :ref:`dev-manual/development-shell:Using a Development
    Shell` for information on how to build and run a specific task using
    devshell. Also, the :ref:`SDK manual shows how to build out a specific recipe
-   <sdk-devtool-use-devtool-modify-to-modify-the-source-of-an-existing-component>`.
+   <sdk-manual/extensible:use \`\`devtool modify\`\` to modify the source of an existing component>`.
 
 #. **An ambiguous definition: Package vs Recipe:**
    A recipe contains instructions the build system uses to create
@@ -151,7 +152,7 @@ contact us with other suggestions.
    need, which is advantageous because you are building for small devices when
    developing for embedded and IoT.
 
-#. **You will want to learn about and know what's packaged in rootfs.**
+#. **You will want to learn about and know what's packaged in the root filesystem.**
 
 #. **Create your own image recipe:**
    There are a number of ways to create your own image recipe.  We suggest you
@@ -172,7 +173,7 @@ contact us with other suggestions.
    * add an ssh server to an image (enable transferring of files to target)
    * know the anatomy of a recipe
    * know how to create and use layers
-   * find recipes (with the `OpenEmbedded Layer index <https://layers.openembedded.org>`_)
+   * find recipes (with the :oe_layerindex:`OpenEmbedded Layer index <>`)
    * understand difference between machine and distro settings
    * find and use the right BSP (machine) for your hardware
    * find examples of distro features and know where to set them
@@ -180,7 +181,7 @@ contact us with other suggestions.
    * understand devtool and how it simplifies your workflow
    * improve build speeds with shared downloads and shared state cache
    * generate and understand a dependency graph
-   * generate and understand bitbake environment
+   * generate and understand BitBake environment
    * build an Extensible SDK for applications development
 
 #. **Depending on what you primary interests are with the Yocto Project, you
@@ -190,28 +191,35 @@ contact us with other suggestions.
      contains procedural information grouped to help you get set up, work with
      layers, customize images, write new recipes, work with libraries, and use
      QEMU. The information is task-based and spans the breadth of the Yocto
-     Project. See the :doc:`../dev-manual/dev-manual`.
+     Project. See the :doc:`/dev-manual/index`.
 
    * **Look Through the Yocto Project Application Development and the Extensible
      Software Development Kit (eSDK) manual**: This manual describes how to use
      both the standard SDK and the extensible SDK, which are used primarily for
-     application development. The :doc:`../sdk-manual/sdk-extensible` also provides
+     application development. The :doc:`/sdk-manual/extensible` also provides
      example workflows that use devtool. See the section
-     :ref:`sdk-manual/sdk-extensible:using \`\`devtool\`\` in your sdk workflow`
+     :ref:`sdk-manual/extensible:using \`\`devtool\`\` in your sdk workflow`
      for more information.
 
    * **Learn About Kernel Development**: If you want to see how to work with the
-     kernel and understand Yocto Linux kernels, see the :doc:`../kernel-dev/kernel-dev`.
+     kernel and understand Yocto Linux kernels, see the :doc:`/kernel-dev/index`.
      This manual provides information on how to patch the kernel, modify kernel
      recipes, and configure the kernel.
 
    * **Learn About Board Support Packages (BSPs)**: If you want to learn about
-     BSPs, see the :doc:`../bsp-guide/bsp-guide`. This manual also provides an
-     example BSP creation workflow. See the :doc:`../bsp-guide/bsp` section.
+     BSPs, see the :doc:`/bsp-guide/index`. This manual also provides an
+     example BSP creation workflow. See the :doc:`/bsp-guide/bsp` section.
 
    * **Learn About Toaster**: Toaster is a web interface to the Yocto Project's
      OpenEmbedded build system. If you are interested in using this type of
-     interface to create images, see the :doc:`../toaster-manual/toaster-manual`.
+     interface to create images, see the :doc:`/toaster-manual/index`.
+
+   * **Discover the VSCode extension**: The `Yocto Project BitBake
+     <https://marketplace.visualstudio.com/items?itemName=yocto-project.yocto-bitbake>`__
+     extension for the Visual Studio Code IDE provides language features and
+     commands for working with the Yocto Project. If you are interested in using
+     this extension, visit its `marketplace page
+     <https://marketplace.visualstudio.com/items?itemName=yocto-project.yocto-bitbake>`__.
 
    * **Have Available the Yocto Project Reference Manual**: Unlike the rest of
      the Yocto Project manual set, this manual is comprised of material suited
@@ -219,7 +227,7 @@ contact us with other suggestions.
      look at how the pieces of the Yocto Project development environment work
      together, information on various technical details, guidance on migrating
      to a newer Yocto Project release, reference material on the directory
-     structure, classes, and tasks. The :doc:`../ref-manual/ref-manual` also
+     structure, classes, and tasks. The :doc:`/ref-manual/index` also
      contains a fairly comprehensive glossary of variables used within the Yocto
      Project.
 

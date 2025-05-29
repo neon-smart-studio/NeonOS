@@ -13,31 +13,25 @@ inherit image_types
 #                                                     Default Free space = 1.3x
 #                                                     Use IMAGE_OVERHEAD_FACTOR to add more space
 #                                                     <--------->
-#            4MiB              40MiB           SDIMG_ROOTFS
+#            4MiB              48MiB           SDIMG_ROOTFS
 # <-----------------------> <----------> <---------------------->
 #  ------------------------ ------------ ------------------------
 # | IMAGE_ROOTFS_ALIGNMENT | BOOT_SPACE | ROOTFS_SIZE            |
 #  ------------------------ ------------ ------------------------
 # ^                        ^            ^                        ^
 # |                        |            |                        |
-# 0                      4MiB     4MiB + 40MiB       4MiB + 40Mib + SDIMG_ROOTFS
+# 0                      4MiB     4MiB + 48MiB       4MiB + 48Mib + SDIMG_ROOTFS
 
 # This image depends on the rootfs image
-IMAGE_TYPEDEP_rpi-sdimg = "${SDIMG_ROOTFS_TYPE}"
-
-# Set kernel and boot loader
-IMAGE_BOOTLOADER ?= "bootfiles"
-
-# Kernel image name
-SDIMG_KERNELIMAGE_raspberrypi  ?= "kernel.img"
-SDIMG_KERNELIMAGE_raspberrypi2 ?= "kernel7.img"
-SDIMG_KERNELIMAGE_raspberrypi3-64 ?= "kernel8.img"
+IMAGE_TYPEDEP:rpi-sdimg = "${SDIMG_ROOTFS_TYPE}"
 
 # Boot partition volume id
-BOOTDD_VOLUME_ID ?= "${MACHINE}"
+# Shorten raspberrypi to just rpi to keep it under 11 characters
+# now enforced by mkfs.vfat from dosfstools-4.2
+BOOTDD_VOLUME_ID ?= "${@d.getVar('MACHINE').replace('raspberrypi', 'rpi')}"
 
 # Boot partition size [in KiB] (will be rounded up to IMAGE_ROOTFS_ALIGNMENT)
-BOOT_SPACE ?= "40960"
+BOOT_SPACE ?= "49152"
 
 # Set alignment to 4MB [in KiB]
 IMAGE_ROOTFS_ALIGNMENT = "4096"
@@ -56,8 +50,7 @@ do_image_rpi_sdimg[depends] = " \
     mtools-native:do_populate_sysroot \
     dosfstools-native:do_populate_sysroot \
     virtual/kernel:do_deploy \
-    ${IMAGE_BOOTLOADER}:do_deploy \
-    rpi-config:do_deploy \
+    rpi-bootfiles:do_deploy \
     ${@bb.utils.contains('MACHINE_FEATURES', 'armstub', 'armstubs:do_deploy', '' ,d)} \
     ${@bb.utils.contains('RPI_USE_U_BOOT', '1', 'u-boot:do_deploy', '',d)} \
     ${@bb.utils.contains('RPI_USE_U_BOOT', '1', 'u-boot-default-script:do_deploy', '',d)} \
@@ -67,7 +60,7 @@ do_image_rpi_sdimg[depends] = " \
 do_image_rpi_sdimg[recrdeps] = "do_build"
 
 # SD card image name
-SDIMG = "${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.rpi-sdimg"
+SDIMG = "${IMGDEPLOYDIR}/${IMAGE_NAME}.rpi-sdimg"
 
 # Additional files and/or directories to be copied into the vfat partition from the IMAGE_ROOTFS.
 FATPAYLOAD ?= ""
@@ -77,19 +70,7 @@ SDIMG_VFAT_DEPLOY ?= "${RPI_USE_U_BOOT}"
 SDIMG_VFAT = "${IMAGE_NAME}.vfat"
 SDIMG_LINK_VFAT = "${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.vfat"
 
-def split_overlays(d, out, ver=None):
-    dts = d.getVar("KERNEL_DEVICETREE")
-    # Device Tree Overlays are assumed to be suffixed by '-overlay.dtb' (4.1.x) or by '.dtbo' (4.4.9+) string and will be put in a dedicated folder
-    if out:
-        overlays = oe.utils.str_filter_out('\S+\-overlay\.dtb$', dts, d)
-        overlays = oe.utils.str_filter_out('\S+\.dtbo$', overlays, d)
-    else:
-        overlays = oe.utils.str_filter('\S+\-overlay\.dtb$', dts, d) + \
-                   " " + oe.utils.str_filter('\S+\.dtbo$', dts, d)
-
-    return overlays
-
-IMAGE_CMD_rpi-sdimg () {
+IMAGE_CMD:rpi-sdimg () {
 
     # Align partitions
     BOOT_SPACE_ALIGNED=$(expr ${BOOT_SPACE} + ${IMAGE_ROOTFS_ALIGNMENT} - 1)
@@ -99,7 +80,7 @@ IMAGE_CMD_rpi-sdimg () {
     echo "Creating filesystem with Boot partition ${BOOT_SPACE_ALIGNED} KiB and RootFS $ROOTFS_SIZE KiB"
 
     # Check if we are building with device tree support
-    DTS="${KERNEL_DEVICETREE}"
+    DTS="${@make_dtb_boot_files(d)}"
 
     # Initialize sdcard image file
     dd if=/dev/zero of=${SDIMG} bs=1024 count=0 seek=${SDIMG_SIZE}
@@ -122,17 +103,20 @@ IMAGE_CMD_rpi-sdimg () {
         mcopy -v -i ${WORKDIR}/boot.img -s ${DEPLOY_DIR_IMAGE}/armstubs/${ARMSTUB} ::/ || bbfatal "mcopy cannot copy ${DEPLOY_DIR_IMAGE}/armstubs/${ARMSTUB} into boot.img"
     fi
     if test -n "${DTS}"; then
-        # Copy board device trees to root folder
-        for dtbf in ${@split_overlays(d, True)}; do
-            dtb=`basename $dtbf`
-            mcopy -v -i ${WORKDIR}/boot.img -s ${DEPLOY_DIR_IMAGE}/$dtb ::$dtb || bbfatal "mcopy cannot copy ${DEPLOY_DIR_IMAGE}/$dtb into boot.img"
-        done
-
-        # Copy device tree overlays to dedicated folder
+        # Copy board device trees (including overlays)
+        # There is an assumption here - no DTB in other directories than root
+        # and root/overlays. mmd/mcopy are not very flexible tools.
         mmd -i ${WORKDIR}/boot.img overlays
-        for dtbf in ${@split_overlays(d, False)}; do
-            dtb=`basename $dtbf`
-            mcopy -v -i ${WORKDIR}/boot.img -s ${DEPLOY_DIR_IMAGE}/$dtb ::overlays/$dtb || bbfatal "mcopy cannot copy ${DEPLOY_DIR_IMAGE}/$dtb into boot.img"
+        for entry in ${DTS} ; do
+            # Split entry at optional ';'
+            if [ $(echo "$entry" | grep -c \;) = "0" ] ; then
+                DEPLOY_FILE="$entry"
+                DEST_FILENAME="$entry"
+            else
+                DEPLOY_FILE="$(echo "$entry" | cut -f1 -d\;)"
+                DEST_FILENAME="$(echo "$entry" | cut -f2- -d\;)"
+            fi
+            mcopy -v -i ${WORKDIR}/boot.img -s ${DEPLOY_DIR_IMAGE}/${DEPLOY_FILE} ::${DEST_FILENAME} || bbfatal "mcopy cannot copy ${DEPLOY_DIR_IMAGE}/${DEPLOY_FILE} into boot.img"
         done
     fi
     if [ "${RPI_USE_U_BOOT}" = "1" ]; then

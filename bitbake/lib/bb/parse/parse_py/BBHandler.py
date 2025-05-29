@@ -13,20 +13,18 @@
 #
 
 import re, bb, os
-import bb.build, bb.utils
+import bb.build, bb.utils, bb.data_smart
 
 from . import ConfHandler
 from .. import resolve_file, ast, logger, ParseError
 from .ConfHandler import include, init
 
-# For compatibility
-bb.deprecate_import(__name__, "bb.parse", ["vars_from_file"])
-
 __func_start_regexp__    = re.compile(r"(((?P<py>python(?=(\s|\()))|(?P<fr>fakeroot(?=\s)))\s*)*(?P<func>[\w\.\-\+\{\}\$:]+)?\s*\(\s*\)\s*{$" )
 __inherit_regexp__       = re.compile(r"inherit\s+(.+)" )
+__inherit_def_regexp__   = re.compile(r"inherit_defer\s+(.+)" )
 __export_func_regexp__   = re.compile(r"EXPORT_FUNCTIONS\s+(.+)" )
 __addtask_regexp__       = re.compile(r"addtask\s+(?P<func>\w+)\s*((before\s*(?P<before>((.*(?=after))|(.*))))|(after\s*(?P<after>((.*(?=before))|(.*)))))*")
-__deltask_regexp__       = re.compile(r"deltask\s+(?P<func>\w+)(?P<ignores>.*)")
+__deltask_regexp__       = re.compile(r"deltask\s+(.+)")
 __addhandler_regexp__    = re.compile(r"addhandler\s+(.+)" )
 __def_regexp__           = re.compile(r"def\s+(\w+).*:" )
 __python_func_regexp__   = re.compile(r"(\s+.*)|(^$)|(^#)" )
@@ -36,6 +34,7 @@ __infunc__ = []
 __inpython__ = False
 __body__   = []
 __classname__ = ""
+__residue__ = []
 
 cached_statements = {}
 
@@ -43,31 +42,46 @@ def supports(fn, d):
     """Return True if fn has a supported extension"""
     return os.path.splitext(fn)[-1] in [".bb", ".bbclass", ".inc"]
 
-def inherit(files, fn, lineno, d):
+def inherit(files, fn, lineno, d, deferred=False):
     __inherit_cache = d.getVar('__inherit_cache', False) or []
+    #if "${" in files and not deferred:
+    #    bb.warn("%s:%s has non deferred conditional inherit" % (fn, lineno))
     files = d.expand(files).split()
     for file in files:
-        if not os.path.isabs(file) and not file.endswith(".bbclass"):
-            file = os.path.join('classes', '%s.bbclass' % file)
+        classtype = d.getVar("__bbclasstype", False)
+        origfile = file
+        for t in ["classes-" + classtype, "classes"]:
+            file = origfile
+            if not os.path.isabs(file) and not file.endswith(".bbclass"):
+                file = os.path.join(t, '%s.bbclass' % file)
 
-        if not os.path.isabs(file):
-            bbpath = d.getVar("BBPATH")
-            abs_fn, attempts = bb.utils.which(bbpath, file, history=True)
-            for af in attempts:
-                if af != abs_fn:
-                    bb.parse.mark_dependency(d, af)
-            if abs_fn:
-                file = abs_fn
+            if not os.path.isabs(file):
+                bbpath = d.getVar("BBPATH")
+                abs_fn, attempts = bb.utils.which(bbpath, file, history=True)
+                for af in attempts:
+                    if af != abs_fn:
+                        bb.parse.mark_dependency(d, af)
+                if abs_fn:
+                    file = abs_fn
+
+            if os.path.exists(file):
+                break
+
+        if not os.path.exists(file):
+            raise ParseError("Could not inherit file %s" % (file), fn, lineno)
 
         if not file in __inherit_cache:
-            logger.debug(1, "Inheriting %s (from %s:%d)" % (file, fn, lineno))
+            logger.debug("Inheriting %s (from %s:%d)" % (file, fn, lineno))
             __inherit_cache.append( file )
             d.setVar('__inherit_cache', __inherit_cache)
-            include(fn, file, lineno, d, "inherit")
+            try:
+                bb.parse.handle(file, d, True)
+            except (IOError, OSError) as exc:
+                raise ParseError("Could not inherit file %s: %s" % (fn, exc.strerror), fn, lineno)
             __inherit_cache = d.getVar('__inherit_cache', False) or []
 
 def get_statements(filename, absolute_filename, base_name):
-    global cached_statements
+    global cached_statements, __residue__, __body__
 
     try:
         return cached_statements[absolute_filename]
@@ -87,12 +101,17 @@ def get_statements(filename, absolute_filename, base_name):
             # add a blank line to close out any python definition
             feeder(lineno, "", filename, base_name, statements, eof=True)
 
+        if __residue__:
+            raise ParseError("Unparsed lines %s: %s" % (filename, str(__residue__)), filename, lineno)
+        if __body__:
+            raise ParseError("Unparsed lines from unclosed function %s: %s" % (filename, str(__body__)), filename, lineno)
+
         if filename.endswith(".bbclass") or filename.endswith(".inc"):
             cached_statements[absolute_filename] = statements
         return statements
 
-def handle(fn, d, include):
-    global __func_start_regexp__, __inherit_regexp__, __export_func_regexp__, __addtask_regexp__, __addhandler_regexp__, __infunc__, __body__, __residue__, __classname__
+def handle(fn, d, include, baseconfig=False):
+    global __infunc__, __body__, __residue__, __classname__
     __body__ = []
     __infunc__ = []
     __classname__ = ""
@@ -144,7 +163,7 @@ def handle(fn, d, include):
     return d
 
 def feeder(lineno, s, fn, root, statements, eof=False):
-    global __func_start_regexp__, __inherit_regexp__, __export_func_regexp__, __addtask_regexp__, __addhandler_regexp__, __def_regexp__, __python_func_regexp__, __inpython__, __infunc__, __body__, bb, __residue__, __classname__
+    global __inpython__, __infunc__, __body__, __residue__, __classname__
 
     # Check tabs in python functions:
     # - def py_funcname(): covered by __inpython__
@@ -181,10 +200,10 @@ def feeder(lineno, s, fn, root, statements, eof=False):
 
     if s and s[0] == '#':
         if len(__residue__) != 0 and __residue__[0][0] != "#":
-            bb.fatal("There is a comment on line %s of file %s (%s) which is in the middle of a multiline expression.\nBitbake used to ignore these but no longer does so, please fix your metadata as errors are likely as a result of this change." % (lineno, fn, s))
+            bb.fatal("There is a comment on line %s of file %s:\n'''\n%s\n'''\nwhich is in the middle of a multiline expression. This syntax is invalid, please correct it." % (lineno, fn, s))
 
     if len(__residue__) != 0 and __residue__[0][0] == "#" and (not s or s[0] != "#"):
-        bb.fatal("There is a confusing multiline, partially commented expression on line %s of file %s (%s).\nPlease clarify whether this is all a comment or should be parsed." % (lineno, fn, s))
+        bb.fatal("There is a confusing multiline partially commented expression on line %s of file %s:\n%s\nPlease clarify whether this is all a comment or should be parsed." % (lineno - len(__residue__), fn, "\n".join(__residue__)))
 
     if s and s[-1] == '\\':
         __residue__.append(s[:-1])
@@ -233,14 +252,15 @@ def feeder(lineno, s, fn, root, statements, eof=False):
             if taskexpression.count(word) > 1:
                 logger.warning("addtask contained multiple '%s' keywords, only one is supported" % word)
 
+        # Check and warn for having task with exprssion as part of task name
+        for te in taskexpression:
+            if any( ( "%s_" % keyword ) in te for keyword in bb.data_smart.__setvar_keyword__ ):
+                raise ParseError("Task name '%s' contains a keyword which is not recommended/supported.\nPlease rename the task not to include the keyword.\n%s" % (te, ("\n".join(map(str, bb.data_smart.__setvar_keyword__)))), fn)
         ast.handleAddTask(statements, fn, lineno, m)
         return
 
     m = __deltask_regexp__.match(s)
     if m:
-        # Check and warn "for deltask task1 task2"
-        if m.group('ignores'):
-            logger.warning('deltask ignored: "%s"' % m.group('ignores'))
         ast.handleDelTask(statements, fn, lineno, m)
         return
 
@@ -254,7 +274,12 @@ def feeder(lineno, s, fn, root, statements, eof=False):
         ast.handleInherit(statements, fn, lineno, m)
         return
 
-    return ConfHandler.feeder(lineno, s, fn, statements)
+    m = __inherit_def_regexp__.match(s)
+    if m:
+        ast.handleInheritDeferred(statements, fn, lineno, m)
+        return
+
+    return ConfHandler.feeder(lineno, s, fn, statements, conffile=False)
 
 # Add us to the handlers list
 from .. import handlers

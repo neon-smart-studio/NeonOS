@@ -11,8 +11,12 @@ server and queue them for the UI to process. This process must be used to avoid
 client/server deadlocks.
 """
 
-import socket, threading, pickle, collections
+import collections, logging, pickle, socket, threading
 from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
+
+import bb
+
+logger = logging.getLogger(__name__)
 
 class BBUIEventQueue:
     def __init__(self, BBServer, clientinfo=("localhost, 0")):
@@ -40,7 +44,7 @@ class BBUIEventQueue:
         for count_tries in range(5):
             ret = self.BBServer.registerEventHandler(self.host, self.port)
 
-            if isinstance(ret, collections.Iterable):
+            if isinstance(ret, collections.abc.Iterable):
                 self.EventHandle, error = ret
             else:
                 self.EventHandle = ret
@@ -61,35 +65,27 @@ class BBUIEventQueue:
         self.server = server
 
         self.t = threading.Thread()
-        self.t.setDaemon(True)
+        self.t.daemon = True
         self.t.run = self.startCallbackHandler
         self.t.start()
 
     def getEvent(self):
-
-        self.eventQueueLock.acquire()
-
-        if len(self.eventQueue) == 0:
-            self.eventQueueLock.release()
-            return None
-
-        item = self.eventQueue.pop(0)
-
-        if len(self.eventQueue) == 0:
-            self.eventQueueNotify.clear()
-
-        self.eventQueueLock.release()
-        return item
+        with bb.utils.lock_timeout(self.eventQueueLock):
+            if not self.eventQueue:
+                return None
+            item = self.eventQueue.pop(0)
+            if not self.eventQueue:
+                self.eventQueueNotify.clear()
+            return item
 
     def waitEvent(self, delay):
         self.eventQueueNotify.wait(delay)
         return self.getEvent()
 
     def queue_event(self, event):
-        self.eventQueueLock.acquire()
-        self.eventQueue.append(event)
-        self.eventQueueNotify.set()
-        self.eventQueueLock.release()
+        with bb.utils.lock_timeout(self.eventQueueLock):
+            self.eventQueue.append(event)
+            self.eventQueueNotify.set()
 
     def send_event(self, event):
         self.queue_event(pickle.loads(event))

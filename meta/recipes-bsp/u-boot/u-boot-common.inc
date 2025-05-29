@@ -4,23 +4,30 @@ ARM, MIPS and several other processors, which can be installed in a boot \
 ROM and used to initialize and test the hardware or to download and run \
 application code."
 SECTION = "bootloaders"
-DEPENDS += "flex-native bison-native"
+DEPENDS += "flex-native bison-native python3-setuptools-native"
 
-LICENSE = "GPLv2+"
-LIC_FILES_CHKSUM = "file://Licenses/README;md5=30503fd321432fc713238f582193b78e"
+LICENSE = "GPL-2.0-or-later"
+LIC_FILES_CHKSUM = "file://Licenses/README;md5=2ca5f2c35c8cc335f0a19756634782f1"
 PE = "1"
 
 # We use the revision in order to avoid having to fetch it from the
 # repo during parse
-SRCREV = "303f8fed261020c1cb7da32dad63b610bf6873dd"
+SRCREV = "866ca972d6c3cabeaf6dbac431e8e08bb30b3c8e"
 
 SRC_URI = "git://source.denx.de/u-boot/u-boot.git;protocol=https;branch=master \
-           file://remove-redundant-yyloc-global.patch \
-           file://CVE-2020-8432.patch \
-           file://CVE-2020-10648-1.patch \
-           file://CVE-2020-10648-2.patch \
-          "
-          
+           file://CVE-2024-57254.patch \
+           file://CVE-2024-57255.patch \
+           file://CVE-2024-57256.patch \
+           file://CVE-2024-57257.patch \
+           file://CVE-2024-57258-1.patch \
+           file://CVE-2024-57258-2.patch \
+           file://CVE-2024-57258-3.patch \
+           file://CVE-2024-57259.patch \
+"
+
 S = "${WORKDIR}/git"
 B = "${WORKDIR}/build"
+
+inherit pkgconfig
+
 do_configure[cleandirs] = "${B}"

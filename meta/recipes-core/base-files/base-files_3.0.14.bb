@@ -1,8 +1,7 @@
 SUMMARY = "Miscellaneous files for the base system"
 DESCRIPTION = "The base-files package creates the basic system directory structure and provides a small set of key configuration files for the system."
 SECTION = "base"
-PR = "r89"
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://licenses/GPL-2;md5=94d55d512a9ba36caa9b7df079bae19f"
 # Removed all license related tasks in this recipe as license.bbclass 
 # now deals with this. In order to get accurate licensing on to the image:
@@ -24,11 +23,13 @@ SRC_URI = "file://rotation \
            file://share/dot.profile \
            file://licenses/GPL-2 \
            "
+SRC_URI:append:libc-glibc = "${@bb.utils.contains('DISTRO_FEATURES', 'systemd systemd-resolved', ' file://0001-add-nss-resolve-to-nsswitch.patch', '', d)}"
+
 S = "${WORKDIR}"
 
 INHIBIT_DEFAULT_DEPS = "1"
 
-docdir_append = "/${P}"
+docdir:append = "/${P}"
 dirs1777 = "/tmp ${localstatedir}/volatile/tmp"
 dirs2775 = ""
 dirs555 = "/sys /proc"
@@ -64,33 +65,10 @@ conffiles = "${sysconfdir}/debian_version ${sysconfdir}/host.conf \
 # hostnames.
 #
 # The hostname can be changed outside of this recipe by using
-# hostname_pn-base-files = "my-host-name".
+# hostname:pn-base-files = "my-host-name".
 hostname = "${MACHINE}"
 
 BASEFILESISSUEINSTALL ?= "do_install_basefilesissue"
-
-# In previous versions of base-files, /run was a softlink to /var/run and the
-# directory was located in /var/volatlie/run.  Also, /var/lock was a softlink
-# to /var/volatile/lock which is where the real directory was located.  Now,
-# /run and /run/lock are the real directories.  If we are upgrading, we may
-# need to remove the symbolic links first before we create the directories.
-# Otherwise the directory creation will fail and we will have circular symbolic
-# links.
-# 
-pkg_preinst_${PN} () {
-    #!/bin/sh -e
-    if [ x"$D" = "x" ]; then
-        if [ -h "/var/lock" ]; then
-            # Remove the symbolic link
-            rm -f /var/lock
-        fi
-
-        if [ -h "/run" ]; then
-            # Remove the symbolic link
-            rm -f /run
-        fi
-    fi     
-}
 
 do_install () {
 	for d in ${dirs555}; do
@@ -137,9 +115,13 @@ do_install () {
 		echo ${hostname} > ${D}${sysconfdir}/hostname
 		echo "127.0.1.1 ${hostname}" >> ${D}${sysconfdir}/hosts
 	fi
+
+	if ${@bb.utils.contains('DISTRO_FEATURES', 'ipv6', 'false', 'true', d)}; then
+		sed -i '/^::1/s/ localhost//' ${D}${sysconfdir}/hosts
+	fi
 }
 
-do_install_append_libc-glibc () {
+do_install:append:libc-glibc () {
 	install -m 0644 ${WORKDIR}/nsswitch.conf ${D}${sysconfdir}/nsswitch.conf
 }
 
@@ -162,7 +144,7 @@ do_install_basefilesissue () {
 }
 do_install_basefilesissue[vardepsexclude] += "DATE"
 
-do_install_append_linuxstdbase() {
+do_install:append:linuxstdbase() {
 	for d in ${dirs755-lsb}; do
                 install -m 0755 -d ${D}$d
         done
@@ -175,10 +157,12 @@ do_install_append_linuxstdbase() {
 SYSROOT_DIRS += "${sysconfdir}/skel"
 
 PACKAGES = "${PN}-doc ${PN} ${PN}-dev ${PN}-dbg"
-FILES_${PN} = "/"
-FILES_${PN}-doc = "${docdir} ${datadir}/common-licenses"
+FILES:${PN} = "/"
+FILES:${PN}-doc = "${docdir} ${datadir}/common-licenses"
 
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
-CONFFILES_${PN} = "${sysconfdir}/fstab ${@['', '${sysconfdir}/hostname ${sysconfdir}/hosts'][(d.getVar('hostname') != '')]} ${sysconfdir}/shells"
-CONFFILES_${PN} += "${sysconfdir}/motd ${sysconfdir}/nsswitch.conf ${sysconfdir}/profile"
+CONFFILES:${PN} = "${sysconfdir}/fstab ${@['', '${sysconfdir}/hostname ${sysconfdir}/hosts'][(d.getVar('hostname') != '')]} ${sysconfdir}/shells"
+CONFFILES:${PN} += "${sysconfdir}/motd ${sysconfdir}/nsswitch.conf ${sysconfdir}/profile"
+
+INSANE_SKIP:${PN} += "empty-dirs"

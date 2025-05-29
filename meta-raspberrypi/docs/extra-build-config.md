@@ -29,7 +29,7 @@ Accommodate the values above to your own needs (ex: ext3 / ext4).
 * `GPU_MEM_1024`: GPU memory in megabyte for the 1024MB Raspberry Pi. Ignored by
   the 256MB/512MB RP. Overrides gpu_mem. Max 944. Default not set.
 
-See: <https://www.raspberrypi.org/documentation/configuration/config-txt/memory.md>
+See: <https://www.raspberrypi.com/documentation/computers/config_txt.html#memory-options>
 
 ## VC4
 
@@ -47,7 +47,7 @@ You can supply more licenses separated by comma. Example:
 
     KEY_DECODE_WVC1 = "0x12345678,0xabcdabcd,0x87654321"
 
-See: <https://www.raspberrypi.org/documentation/configuration/config-txt/codeclicence.md>
+See: <https://www.raspberrypi.com/documentation/computers/config_txt.html#licence-key-and-codec-options>
 
 ## Disable overscan
 
@@ -74,6 +74,22 @@ To remove (or adjust) this delay set these variables in local.conf:
     BOOT_DELAY = "0"
     BOOT_DELAY_MS = "0"
 
+## Boot media
+
+The Raspberry Pi 4 board can load the boot image files from SD card and USB memory.
+By default SD card media is used as boot media.
+
+To switch the boot media from SD card to USB memory, the following variables are supported
+in local.conf: `CMDLINE_ROOT_PARTITION` and `BOOT_MEDIA`.
+The default value of `CMDLINE_ROOT_PARTITION` is "/dev/mmcblk0p2" to mount SD card. If you want to mount USB memory partition, set CMDLINE_ROOT_PARTITION to "/dev/sda2".
+`BOOT_MEDIA` allows  `mmc` and `usb`. The "mmc" is required to load an image from the SD card, following the u-boot specification. Similarly, if you want to load a boot image file from USB memory, set BOOT_MEDIA to "usb".
+
+For example, if you want to use USB boot, please define
+the following parameters in your local.conf file.
+
+    CMDLINE_ROOT_PARTITION = "/dev/sda2"
+    BOOT_MEDIA = "usb"
+
 ## Set overclocking options
 
 The Raspberry Pi can be overclocked. As of now overclocking up to the "Turbo
@@ -89,7 +105,7 @@ Example official settings for Turbo Mode in Raspberry Pi 2:
     SDRAM_FREQ = "500"
     OVER_VOLTAGE = "6"
 
-See: <https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md>
+See: <https://www.raspberrypi.com/documentation/computers/config_txt.html#overclocking-options>
 
 ## HDMI and composite video options
 
@@ -99,14 +115,14 @@ selected according to the connected monitor's EDID information and the composite
 mode is defaulted to NTSC using a 4:3 aspect ratio. Check the config.txt for a
 detailed description of options and modes. The following variables are supported in
 local.conf: `HDMI_FORCE_HOTPLUG`, `HDMI_DRIVE`, `HDMI_GROUP`, `HDMI_MODE`,
-`CONFIG_HDMI_BOOST`, `SDTV_MODE`, `SDTV_ASPECT` and `DISPLAY_ROTATE`.
+`HDMI_CVT`, `CONFIG_HDMI_BOOST`, `SDTV_MODE`, `SDTV_ASPECT` and `DISPLAY_ROTATE`.
 
 Example to force HDMI output to 720p in CEA mode:
 
     HDMI_GROUP = "1"
     HDMI_MODE = "4"
 
-See: <https://www.raspberrypi.org/documentation/configuration/config-txt/video.md>
+See: <https://www.raspberrypi.com/documentation/computers/configuration.html#hdmi-configuration>
 
 ## Video camera support with V4L2 drivers
 
@@ -155,11 +171,21 @@ For further customisation the KERNEL_IMAGETYPE and KERNEL_BOOTCMD variables can
 be overridden to select the exact kernel image type (eg. zImage) and u-boot
 command (eg. bootz) to be used.
 
+To operate correctly, U-Boot requires `enable_uart=1` in `config.txt` file for
+the following boards:
+* Raspberry Pi Zero W
+* Raspberry Pi 3 32-bit
+* Raspberry Pi 3 64-bit
+* Raspberry Pi 4 32-bit
+* Raspberry Pi 4 64-bit
+It means that, for those boards, `RPI_USE_U_BOOT = "1"` is not compatible with
+`ENABLE_UART = "0"`.
+
 ## Image with Initramfs
 
 To build an initramfs image:
 
-* Set this 3 kernel variables (in kernel's do_configure_prepend in linux-raspberrypi.inc after the line kernel_configure_variable LOCALVERSION "\"\""
+* Set this 3 kernel variables (in kernel's do_configure:prepend in linux-raspberrypi.inc after the line kernel_configure_variable LOCALVERSION "\"\""
 )
   - kernel_configure_variable BLK_DEV_INITRD y
   - kernel_configure_variable INITRAMFS_SOURCE ""
@@ -170,7 +196,7 @@ To build an initramfs image:
   - `INITRAMFS_IMAGE_BUNDLE = "1"`
   - `BOOT_SPACE = "1073741"`
   - `INITRAMFS_MAXSIZE = "315400"`
-  - `IMAGE_FSTYPES_pn-${INITRAMFS_IMAGE} = "${INITRAMFS_FSTYPES}"`
+  - `IMAGE_FSTYPES:pn-${INITRAMFS_IMAGE} = "${INITRAMFS_FSTYPES}"`
 
 ## Including additional files in the SD card image boot partition
 
@@ -195,7 +221,7 @@ by tasks that image building task must depend upon, to ensure that the
 files are available when they are needed, so these component deploy
 tasks must be added to: RPI_SDIMG_EXTRA_DEPENDS.
 
-    RPI_SDIMG_EXTRA_DEPENDS_append = " example:do_deploy"
+    RPI_SDIMG_EXTRA_DEPENDS:append = " example:do_deploy"
 
 ## Enable SPI bus
 
@@ -211,7 +237,7 @@ When using device tree kernels, set this variable to enable I2C:
 
 Furthermore, to auto-load I2C kernel modules set:
 
-    KERNEL_MODULE_AUTOLOAD_rpi += "i2c-dev i2c-bcm2708"
+    KERNEL_MODULE_AUTOLOAD:rpi += "i2c-dev i2c-bcm2708"
 
 ## Enable PiTFT support
 
@@ -278,6 +304,18 @@ the header extension should set the following in local.conf:
 
     ENABLE_DWC2_HOST = "1"
 
+## Set CPUs to be isolated from the standard Linux scheduler
+
+By default Linux will use all available CPUs for scheduling tasks. For real time
+purposes there can be an advantage to isolating one or more CPUs from the
+standard scheduler. It should be noted that CPU 0 is special, it is the only CPU
+available during the early stages of the boot process and cannot be isolated.
+
+The string assigned to this variable may be a single CPU number, a comma
+separated list ("1,2"), a range("1-3"), or a mixture of these ("1,3-5")
+
+    ISOLATED_CPUS = "1-2"
+
 ## Enable Openlabs 802.15.4 radio module
 
 When using device tree kernels, set this variable to enable the 802.15.4 hat:
@@ -290,17 +328,24 @@ See: <https://openlabs.co/OSHW/Raspberry-Pi-802.15.4-radio>
 
 In order to use CAN with an MCP2515-based module, set the following variables:
 
-	ENABLE_SPI_BUS = "1"
-	ENABLE_CAN = "1"
+    ENABLE_SPI_BUS = "1"
+    ENABLE_CAN = "1"
 
 In case of dual CAN module (e.g. PiCAN2 Duo), set following variables instead:
 
     ENABLE_SPI_BUS = "1"
-	ENABLE_DUAL_CAN = "1"
+    ENABLE_DUAL_CAN = "1"
 
 Some modules may require setting the frequency of the crystal oscillator used on the particular board. The frequency is usually marked on the package of the crystal. By default, it is set to 16 MHz. To change that to 8 MHz, the following variable also has to be set:
 
     CAN_OSCILLATOR="8000000"
+
+Configure the interrupt pin to the one connected to the CAN module. By default,
+the pins are set to 25 for can0 and 24 for can1. To change them to 12 and 16,
+the following variables also have to be set:
+
+    CAN0_INTERRUPT_PIN = "12"
+    CAN1_INTERRUPT_PIN = "16"
 
 Tested modules:
 
@@ -320,6 +365,38 @@ Appropriate kernel modules will be also included in the image. By default the
 GPIO pin for gpio-ir is set to 18 and the pin for gpio-ir-tx is 17. Both pins
 can be easily changed by modifying variables `GPIO_IR` and `GPIO_IR_TX`.
 
+## Enable gpio-shutdown
+
+When using device tree kernels, set this variable to enable gpio-shutdown:
+
+    ENABLE_GPIO_SHUTDOWN = "1"
+
+This will add the corresponding device tree overlay to config.txt and include
+the gpio-keys kernel module in the image. If System V init is used, additional
+mapping is applied to bind the button event to shutdown command. Systemd init
+should handle the event out of the box.
+
+By default the feature uses gpio pin 3 (except RPi 1 Model B rev 1 enumerates
+the pin as gpio 1). This conflicts with the I2C bus. If you set `ENABLE_I2C`
+to `1` or enabled `PiTFT` support, or otherwise want to use another pin, use
+`GPIO_SHUTDOWN_PIN` to assign another pin. Example using gpio pin 25:
+
+     GPIO_SHUTDOWN_PIN = "25"
+
+## Enable One-Wire Interface
+
+One-wire is a single-wire communication bus typically used to connect sensors
+to the RaspberryPi. The Raspberry Pi supports one-wire on any GPIO pin, but
+the default is GPIO 4. To enable the one-wire interface explicitly set it in
+`local.conf`
+
+    ENABLE_W1 = "1"
+
+Once discovery is complete you can list the devices that your Raspberry Pi has
+discovered via all 1-Wire busses check the interface with this command
+
+`ls /sys/bus/w1/devices/`
+
 ## Manual additions to config.txt
 
 The `RPI_EXTRA_CONFIG` variable can be used to manually add additional lines to
@@ -335,3 +412,93 @@ option:
         # Raspberry Pi 7\" display/touch screen \n \
         lcd_rotate=2 \n \
         '
+## Enable Raspberry Pi Camera Module
+
+Raspberry Pi does not have the unicam device ( Raspberry Pi Camera ) enabled by default.
+Because this unicam device ( bcm2835-unicam ) as of now is used by libcamera opensource.
+So we have to explicitly enable it in local.conf.
+
+    RASPBERRYPI_CAMERA_V2 = "1"
+
+This will add the device tree overlay imx219 ( Raspberry Pi Camera Module V2 sensor driver 
+) to config.txt. Also, this will enable adding Contiguous Memory Allocation value in the 
+cmdline.txt.
+
+Similarly, the Raspberry Pi Camera Module v3 also has to be explicitly enabled in local.conf.
+
+    RASPBERRYPI_CAMERA_V3 = "1"
+
+This will add the device tree overlay imx708 ( Raspberry Pi Camera Module V3 sensor driver ) 
+to config.txt.
+
+See:
+* <https://www.raspberrypi.com/documentation/computers/camera_software.html>
+* <https://www.raspberrypi.org/blog/an-open-source-camera-stack-for-raspberry-pi-using-libcamera/>
+
+## WM8960 soundcard support
+
+Support for WM8960 based sound cards such as the WM8960 Hi-Fi Sound Card HAT for Raspberry Pi from Waveshare, and ReSpeaker 2 / 4 / 6 Mics Pi HAT from Seeed Studio, can be enabled in `local.conf`
+
+    MACHINE_FEATURES += "wm8960"
+
+You may need to adjust volume and toggle switches that are off by default
+
+    amixer -c1 sset 'Headphone',0 80%,80%
+    amixer -c1 sset 'Speaker',0 80%,80%
+    amixer -c1 sset 'Left Input Mixer Boost' toggle
+    amixer -c1 sset 'Left Output Mixer PCM' toggle
+    amixer -c1 sset 'Right Input Mixer Boost' toggle
+    amixer -c1 sset 'Right Output Mixer PCM' toggle
+
+Audio capture on ReSpeaker 2 / 4 / 6 Mics Pi HAT from Seeed Studio is very noisy.
+
+## Support for RTC devices
+
+The RaspberryPi boards don't feature an RTC module and the machine
+configurations provided in this BSP layer have this assumption (until, if at
+all, some later boards will come with one).
+
+`rtc` is handled as a `MACHINE_FEATURES` in the context of the build system
+which means that if an attached device is provided for which support is needed,
+the recommended way forward is to write a new machine configuration based on an
+existing one. Check the documentation for
+`MACHINE_FEATURES_BACKFILL_CONSIDERED` for how this is disabled for the
+relevant machines.
+
+Even when `MACHINE_FEATURES` is tweaked to include the needed `rtc` string,
+make sure that your kernel configuration is supporting the attached device and
+the device tree is properly tweaked. Also, mind the runtime components that
+take advantage of your RTC device. You can do that by checking what is
+included/configured in the build system based on the inclusion of `rtc` in
+`MACHINE_FEATURES`.
+
+## Raspberry Pi Distro VLC
+
+To enable Raspberry Pi Distro VLC, the `meta-openembedded/meta-multimedia` layer must be
+included in your `bblayers.conf`.
+
+VLC does not support HW accelerated video decode through MMAL on a 64-bit OS.
+
+See:
+* <https://forums.raspberrypi.com/viewtopic.php?t=275370>
+* <https://forums.raspberrypi.com/viewtopic.php?t=325218#p1946169>
+
+MMAL is not enabled by default. To enable it add
+
+    DISABLE_VC4GRAPHICS = "1"
+
+to `local.conf`. Adding `vlc` to `IMAGE_INSTALL` will then default to building the Raspberry
+Pi's Distro implementation of VLC with HW accelerated video decode through MMAL into the system
+image. It also defaults to building VLC with Raspberry PI's Distro implementation of ffmpeg. The
+oe-core implementation of ffmpeg and the meta-openembedded/meta-multimedia implementation of VLC
+can however be selected via:
+
+    PREFERRED_PROVIDER_ffmpeg = "ffmpeg"
+    PREFERRED_PROVIDER_vlc = "vlc"
+
+Usage example: Start VLC with mmal_vout plugin and without an active display server.
+
+    DISPLAYNUM=$(tvservice -l | tail -c 2)
+    MMAL_DISPLAY=$(expr $DISPLAYNUM + 1)
+    VLC_SETTINGS="-I dummy --vout=mmal_vout --mmal-resize --mmal-display hdmi-$MMAL_DISPLAY --no-dbus"
+    cvlc $VLC_SETTINGS <video/playlist>

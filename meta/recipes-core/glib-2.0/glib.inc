@@ -4,12 +4,11 @@ HOMEPAGE = "https://developer.gnome.org/glib/"
 
 # pcre is under BSD;
 # docs/reference/COPYING is with a 'public domain'-like license!
-LICENSE = "LGPLv2.1+ & BSD-3-Clause & PD"
-LIC_FILES_CHKSUM = "file://COPYING;md5=4fbd65380cdd255951079008b364516c \
-                    file://glib/glib.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906 \
-                    file://gmodule/COPYING;md5=4fbd65380cdd255951079008b364516c \
-                    file://gmodule/gmodule.h;beginline=4;endline=17;md5=b88abb7f3ad09607e71cb9d530155906 \
-                    file://glib/pcre/pcre.h;beginline=8;endline=36;md5=3e2977dae4ad05217f58c446237298fc \
+LICENSE = "LGPL-2.1-or-later & BSD-3-Clause & PD"
+LIC_FILES_CHKSUM = "file://COPYING;md5=41890f71f740302b785c27661123bff5 \
+                    file://glib/glib.h;beginline=4;endline=17;md5=72f7cc2847407f65d8981ef112e4e630 \
+                    file://LICENSES/LGPL-2.1-or-later.txt;md5=41890f71f740302b785c27661123bff5 \
+                    file://gmodule/gmodule.h;beginline=4;endline=17;md5=72f7cc2847407f65d8981ef112e4e630 \
                     file://docs/reference/COPYING;md5=f51a5100c17af6bae00735cd791e1fcc"
 BUGTRACKER = "http://bugzilla.gnome.org"
 SECTION = "libs"
@@ -22,79 +21,75 @@ DEPENDS = "glib-2.0-native \
            virtual/libintl \
            virtual/libiconv \
            libffi \
+           libpcre2 \
            zlib"
 
 PACKAGES += "${PN}-codegen ${PN}-utils"
 
 LEAD_SONAME = "libglib-2.0.*"
 
-inherit meson gettext gtk-doc pkgconfig ptest-gnome upstream-version-is-even bash-completion gio-module-cache manpages features_check
+inherit meson gettext gtk-doc pkgconfig ptest-gnome upstream-version-is-even bash-completion gio-module-cache manpages gobject-introspection-data
 
 GTKDOC_MESON_OPTION = "gtk_doc"
 
 S = "${WORKDIR}/glib-${PV}"
 
-PACKAGECONFIG ??= "system-pcre libmount \
+PACKAGECONFIG ??= "libmount \
                    ${@bb.utils.contains('PTEST_ENABLED', '1', 'tests', '', d)}"
-# To use the system pcre it must be configured with --enable-unicode-properties
-PACKAGECONFIG[system-pcre] = "-Dinternal_pcre=false,-Dinternal_pcre=true,libpcre"
-PACKAGECONFIG[libmount] = "-Dlibmount=true,-Dlibmount=false,util-linux"
+PACKAGECONFIG[libmount] = "-Dlibmount=enabled,-Dlibmount=disabled,util-linux"
 PACKAGECONFIG[manpages] = "-Dman=true, -Dman=false, libxslt-native xmlto-native"
-# libelf is auto-detected without a configuration option
-PACKAGECONFIG[libelf] = ",,elfutils"
-PACKAGECONFIG[tests] = "-Dinstalled_tests=true,-Dinstalled_tests=false,dbus"
+PACKAGECONFIG[libelf] = "-Dlibelf=enabled,-Dlibelf=disabled,elfutils"
+PACKAGECONFIG[tests] = "-Dinstalled_tests=true,-Dinstalled_tests=false,"
+PACKAGECONFIG[selinux] = "-Dselinux=enabled,-Dselinux=disabled,libselinux"
 
-EXTRA_OEMESON = "-Ddtrace=false -Dfam=false -Dsystemtap=false -Dselinux=disabled"
+EXTRA_OEMESON = "-Ddtrace=false -Dsystemtap=false"
 
-do_configure_prepend() {
+do_configure:prepend() {
 	sed -i -e '1s,#!.*,#!${USRBINPATH}/env python3,' ${S}/gio/gdbus-2.0/codegen/gdbus-codegen.in
 }
 
-FILES_${PN} = "${libdir}/lib*${SOLIBS} \
+FILES:${PN} = "${libdir}/lib*${SOLIBS} \
                ${libdir}/gio \
                ${libexecdir}/*gio-querymodules \
+               ${libexecdir}/*gio-launch-desktop \
+               ${datadir}/glib-2.0/dtds \
                ${datadir}/glib-2.0/schemas"
 
-FILES_${PN}-utils += "${bindir}/glib-genmarshal \
-                      ${bindir}/glib-gettextize \
-                      ${bindir}/glib-mkenums \
-                      ${bindir}/glib-compile-resources"
-
-FILES_${PN}-dev += "${libdir}/glib-2.0/include \
+FILES:${PN}-dev += "${libdir}/glib-2.0/include \
                     ${libdir}/gio/modules/lib*${SOLIBSDEV} \
                     ${libdir}/gio/modules/*.la \
                     ${datadir}/glib-2.0/gettext/po/Makefile.in.in \
                     ${datadir}/glib-2.0/schemas/gschema.dtd \
                     ${datadir}/glib-2.0/valgrind/glib.supp \
                     ${datadir}/gettext/its"
-FILES_${PN}-dbg += "${datadir}/glib-2.0/gdb ${datadir}/gdb"
-FILES_${PN}-codegen = "${datadir}/glib-2.0/codegen/*.py \
+FILES:${PN}-dbg += "${datadir}/glib-2.0/gdb ${datadir}/gdb"
+FILES:${PN}-codegen = "${datadir}/glib-2.0/codegen/*.py \
                        ${bindir}/gdbus-codegen"
-FILES_${PN}-utils = "${bindir}/*"
+FILES:${PN}-utils = "${bindir}/*"
 
 SHAREDMIMEDEP = "shared-mime-info"
-SHAREDMIMEDEP_class-native = ""
+SHAREDMIMEDEP:class-native = ""
 # When cross compiling for Windows we don't want to include this
-SHAREDMIMEDEP_mingw32 = ""
+SHAREDMIMEDEP:mingw32 = ""
 
-RRECOMMENDS_${PN} += "${SHAREDMIMEDEP}"
+RRECOMMENDS:${PN} += "${SHAREDMIMEDEP}"
 
-ARM_INSTRUCTION_SET_armv4 = "arm"
-ARM_INSTRUCTION_SET_armv5 = "arm"
+ARM_INSTRUCTION_SET:armv4 = "arm"
+ARM_INSTRUCTION_SET:armv5 = "arm"
 # Valgrind runtime detection works using hand-written assembly, which
 # doesn't support mips16e
-CPPFLAGS_append_class-target_mips16e = " -DNVALGRIND=1"
+CPPFLAGS:append:class-target:mips16e = " -DNVALGRIND=1"
 
 # GLib generally requires gettext to be present so for USE_NLS to yes.  For
 # native builds as i18n is disabled globally we have to add a gettext-native dependency.
-USE_NLS_class-target = "yes"
-USE_NLS_class-nativesdk = "yes"
-DEPENDS_append_class-native = " gettext-native"
+USE_NLS:class-target = "yes"
+USE_NLS:class-nativesdk = "yes"
+DEPENDS:append:class-native = " gettext-native"
 
 EXEEXT = ""
-EXEEXT_mingw32 = ".exe"
+EXEEXT:mingw32 = ".exe"
 
-do_install_append () {
+do_install:append () {
 	if [ -f ${D}${bindir}/gtester-report ]; then
 		sed ${D}${bindir}/gtester-report -i -e '1s|^#!.*|#!/usr/bin/env python3|'
 	fi
@@ -116,7 +111,12 @@ do_install_append () {
         mkdir -p ${D}${libdir}/gio/modules
 }
 
-do_install_append_class-target () {
+do_install:append:class-native () {
+	# Link gio-querymodules into ${bindir} as otherwise tools like meson won't find it
+        ln -rs ${D}${libexecdir}/gio-querymodules ${D}${bindir}
+}
+
+do_install:append:class-target () {
 	# Tests are only installed on targets, not native builds.  Separating this out
 	# keeps glib-2.0-native from depending on DISTRO_FEATURES
 	if [ -f ${D}${datadir}/installed-tests/glib/gdbus-serialization.test ]; then
@@ -129,24 +129,33 @@ do_install_append_class-target () {
                 mv ${D}${datadir}/installed-tests/glib/static-link.test ${D}${datadir}/installed-tests/glib/${MLPREFIX}static-link.test
         fi
 	fi
+        # https://gitlab.gnome.org/GNOME/glib/-/issues/2810
+        rm -f ${D}${datadir}/installed-tests/glib/thread-pool-slow.test
 }
-
+do_install:append:class-target:libc-musl () {
+        # Remove failing tests on musl libc systems, this helps set baseline for musl testing
+        # they remain to be rootcaused and fixed but marked known failures here.
+        for t in convert.test collate.test gdatetime.test date.test converter-stream.test option-context.test; do
+                rm -rf ${D}${datadir}/installed-tests/glib/$t
+        done
+}
 # As we do not build python3 for windows, makes no sense to ship the script that's using it
-do_install_append_mingw32() {
+do_install:append:mingw32() {
         rm -f ${D}${bindir}/gtester-report
 }
 
-CODEGEN_PYTHON_RDEPENDS = "python3 python3-distutils python3-xml"
-CODEGEN_PYTHON_RDEPENDS_mingw32 = ""
+CODEGEN_PYTHON_RDEPENDS = "python3 python3-packaging python3-xml"
+CODEGEN_PYTHON_RDEPENDS:mingw32 = ""
 
-RDEPENDS_${PN}-codegen += "${CODEGEN_PYTHON_RDEPENDS}"
+RDEPENDS:${PN}-codegen += "${CODEGEN_PYTHON_RDEPENDS}"
 
-RDEPENDS_${PN}-ptest += "${PN}-utils"
+RDEPENDS:${PN}-ptest += "${PN}-utils"
 
-RDEPENDS_${PN}-ptest += "\
+RDEPENDS:${PN}-ptest += "\
             coreutils \
             libgcc \
             dbus \
+            desktop-file-utils \
             gnome-desktop-testing \
             tzdata \
             tzdata-americas \
@@ -164,9 +173,17 @@ RDEPENDS_${PN}-ptest += "\
             ${PN}-locale-th \
             python3-core \
             python3-modules \
+            ${@bb.utils.contains('GI_DATA_ENABLED', 'True', 'python3-dbusmock', '', d)} \
+            ${PN}-codegen \
+            locale-base-de-de \
+            locale-base-es-es \
+            locale-base-en-gb \
+            locale-base-en-us \
+            locale-base-fr-fr \
+            locale-base-ru-ru \
            "
 
-RDEPENDS_${PN}-ptest_append_libc-glibc = "\
+RDEPENDS:${PN}-ptest:append:libc-glibc = "\
             glibc-gconv-utf-16 \
             glibc-charmap-utf-8 \
             glibc-gconv-cp1255 \
@@ -178,18 +195,12 @@ RDEPENDS_${PN}-ptest_append_libc-glibc = "\
             glibc-gconv-iso8859-15 \
             glibc-charmap-invariant \
             glibc-localedata-translit-cjk-variants \
-            locale-base-tr-tr \
             locale-base-lt-lt \
             locale-base-ja-jp.euc-jp \
             locale-base-fa-ir \
-            locale-base-ru-ru \
-            locale-base-de-de \
             locale-base-hr-hr \
             locale-base-el-gr \
-            locale-base-fr-fr \
-            locale-base-es-es \
-            locale-base-en-gb \
-            locale-base-en-us \
             locale-base-pl-pl \
             locale-base-pl-pl.iso-8859-2 \
+            locale-base-tr-tr \
            "

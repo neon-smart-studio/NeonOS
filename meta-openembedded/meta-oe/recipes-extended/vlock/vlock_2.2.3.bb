@@ -6,10 +6,10 @@ DESCRIPTION = "Sometimes a malicious local user could cause more problems \
   "
 SECTION = "utils"
 
-LICENSE = "GPLv2"
+LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=a17cb0a873d252440acfdf9b3d0e7fbf"
 
-SRC_URI = "${GENTOO_MIRROR}/${BP}.tar.gz \
+SRC_URI = "${GENTOO_MIRROR}/37/${BP}.tar.gz \
        file://disable_vlockrc.patch \
        file://vlock_pam_tally2_reset.patch \
        file://vlock-no_tally.patch \
@@ -37,23 +37,23 @@ do_configure () {
         VLOCK_GROUP=root \
         ROOT_GROUP=root \
         CC="${CC}" \
-        CFLAGS="${CFLAGS}" \
         LDFLAGS="${LDFLAGS}" \
         --prefix=${prefix} \
         --libdir=${libdir} \
         --mandir=${mandir} \
         --with-modules="all.so new.so nosysrq.so ttyblank.so vesablank.so" \
         --disable-root-password --enable-debug --disable-fail-count \
+        EXTRA_CFLAGS="${CFLAGS}" \
         ${PACKAGECONFIG_CONFARGS}
 }
 
-do_install_append () {
+do_install:append () {
     if [ ${@bb.utils.contains('DISTRO_FEATURES', 'pam', 'yes', '', d)} = yes ]; then
         install -d -m 0755 ${D}/${sysconfdir}/pam.d
         install -m 0644 ${WORKDIR}/vlock_pam ${D}${sysconfdir}/pam.d/vlock
     fi
 }
 
-ALTERNATIVE_${PN} = "vlock"
+ALTERNATIVE:${PN} = "vlock"
 ALTERNATIVE_PRIORITY = "60"
 ALTERNATIVE_LINK_NAME[vlock] = "${bindir}/vlock"

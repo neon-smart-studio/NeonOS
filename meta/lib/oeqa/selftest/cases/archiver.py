@@ -1,9 +1,12 @@
 #
+# Copyright OpenEmbedded Contributors
+#
 # SPDX-License-Identifier: MIT
 #
 
 import os
 import glob
+import re
 from oeqa.utils.commands import bitbake, get_bb_vars
 from oeqa.selftest.case import OESelftestTestCase
 
@@ -19,8 +22,8 @@ class Archiver(OESelftestTestCase):
         AutomatedBy: Daniel Istrate <daniel.alexandrux.istrate@intel.com>
         """
 
-        include_recipe = 'busybox'
-        exclude_recipe = 'zlib'
+        include_recipe = 'selftest-ed'
+        exclude_recipe = 'initscripts'
 
         features = 'INHERIT += "archiver"\n'
         features += 'ARCHIVER_MODE[src] = "original"\n'
@@ -51,8 +54,8 @@ class Archiver(OESelftestTestCase):
         Author:      André Draszik <adraszik@tycoint.com>
         """
 
-        target_recipe = 'initscripts'
-        native_recipe = 'zlib-native'
+        target_recipe = 'selftest-ed'
+        native_recipe = 'selftest-ed-native'
 
         features = 'INHERIT += "archiver"\n'
         features += 'ARCHIVER_MODE[src] = "original"\n'
@@ -86,8 +89,8 @@ class Archiver(OESelftestTestCase):
         Author:      André Draszik <adraszik@tycoint.com>
         """
 
-        target_recipes = [ 'initscripts', 'zlib' ]
-        native_recipes = [ 'update-rc.d-native', 'zlib-native' ]
+        target_recipes = [ 'initscripts', 'selftest-ed' ]
+        native_recipes = [ 'update-rc.d-native', 'selftest-ed-native' ]
 
         features = 'INHERIT += "archiver"\n'
         features += 'ARCHIVER_MODE[src] = "original"\n'
@@ -117,7 +120,38 @@ class Archiver(OESelftestTestCase):
         excluded_present = len(glob.glob(src_path_target + '/%s-*/*' % target_recipes[1]))
         self.assertFalse(excluded_present, 'Recipe %s was not excluded.' % target_recipes[1])
 
+    def test_archiver_multiconfig_shared_unpack_and_patch(self):
+        """
+        Test that shared recipes in original mode with diff enabled works in multiconfig,
+        otherwise it will not build when using the same TMP dir.
+        """
 
+        features = 'BBMULTICONFIG = "mc1 mc2"\n'
+        features += 'INHERIT += "archiver"\n'
+        features += 'ARCHIVER_MODE[src] = "original"\n'
+        features += 'ARCHIVER_MODE[diff] = "1"\n'
+        self.write_config(features)
+
+        # We can use any machine in multiconfig as long as they are different
+        self.write_config('MACHINE = "qemuarm"\n', 'mc1')
+        self.write_config('MACHINE = "qemux86"\n', 'mc2')
+
+        task = 'do_unpack_and_patch'
+        # Use gcc-source as it is a shared recipe (appends the pv to the pn)
+        pn = 'gcc-source-%s' % get_bb_vars(['PV'], 'gcc')['PV']
+
+        # Generate the tasks signatures
+        bitbake('mc:mc1:%s mc:mc2:%s -c %s -S lockedsigs' % (pn, pn, task))
+
+        # Check the tasks signatures
+        # To be machine agnostic the tasks needs to generate the same signature for each machine
+        locked_sigs_inc = "%s/locked-sigs.inc" % self.builddir
+        locked_sigs = open(locked_sigs_inc).read()
+        task_sigs = re.findall(r"%s:%s:.*" % (pn, task), locked_sigs)
+        uniq_sigs = set(task_sigs)
+        self.assertFalse(len(uniq_sigs) - 1, \
+            'The task "%s" of the recipe "%s" has different signatures in "%s" for each machine in multiconfig' \
+            % (task, pn, locked_sigs_inc))
 
     def test_archiver_srpm_mode(self):
         """
@@ -129,10 +163,10 @@ class Archiver(OESelftestTestCase):
         features += 'PACKAGE_CLASSES = "package_rpm"\n'
         self.write_config(features)
 
-        bitbake('-n core-image-sato')
+        bitbake('-n selftest-nopackages selftest-ed')
 
     def _test_archiver_mode(self, mode, target_file_name, extra_config=None):
-        target = "selftest-ed"
+        target = 'selftest-ed-native'
 
         features = 'INHERIT += "archiver"\n'
         features +=  'ARCHIVER_MODE[src] = "%s"\n' % (mode)
@@ -143,8 +177,8 @@ class Archiver(OESelftestTestCase):
         bitbake('-c clean %s' % (target))
         bitbake('-c deploy_archives %s' % (target))
 
-        bb_vars = get_bb_vars(['DEPLOY_DIR_SRC', 'TARGET_SYS'])
-        glob_str = os.path.join(bb_vars['DEPLOY_DIR_SRC'], bb_vars['TARGET_SYS'], '%s-*' % (target))
+        bb_vars = get_bb_vars(['DEPLOY_DIR_SRC', 'BUILD_SYS'])
+        glob_str = os.path.join(bb_vars['DEPLOY_DIR_SRC'], bb_vars['BUILD_SYS'], '%s-*' % (target))
         glob_result = glob.glob(glob_str)
         self.assertTrue(glob_result, 'Missing archiver directory for %s' % (target))
 
@@ -163,21 +197,21 @@ class Archiver(OESelftestTestCase):
         Test that the archiver works with `ARCHIVER_MODE[src] = "patched"`.
         """
 
-        self._test_archiver_mode('patched', 'selftest-ed-1.14.1-r0-patched.tar.gz')
+        self._test_archiver_mode('patched', 'selftest-ed-native-1.14.1-r0-patched.tar.xz')
 
     def test_archiver_mode_configured(self):
         """
         Test that the archiver works with `ARCHIVER_MODE[src] = "configured"`.
         """
 
-        self._test_archiver_mode('configured', 'selftest-ed-1.14.1-r0-configured.tar.gz')
+        self._test_archiver_mode('configured', 'selftest-ed-native-1.14.1-r0-configured.tar.xz')
 
     def test_archiver_mode_recipe(self):
         """
         Test that the archiver works with `ARCHIVER_MODE[recipe] = "1"`.
         """
 
-        self._test_archiver_mode('patched', 'selftest-ed-1.14.1-r0-recipe.tar.gz',
+        self._test_archiver_mode('patched', 'selftest-ed-native-1.14.1-r0-recipe.tar.xz',
                                  'ARCHIVER_MODE[recipe] = "1"\n')
 
     def test_archiver_mode_diff(self):
@@ -186,7 +220,7 @@ class Archiver(OESelftestTestCase):
         Exclusions controlled by `ARCHIVER_MODE[diff-exclude]` are not yet tested.
         """
 
-        self._test_archiver_mode('patched', 'selftest-ed-1.14.1-r0-diff.gz',
+        self._test_archiver_mode('patched', 'selftest-ed-native-1.14.1-r0-diff.gz',
                                  'ARCHIVER_MODE[diff] = "1"\n')
 
     def test_archiver_mode_dumpdata(self):
@@ -194,7 +228,7 @@ class Archiver(OESelftestTestCase):
         Test that the archiver works with `ARCHIVER_MODE[dumpdata] = "1"`.
         """
 
-        self._test_archiver_mode('patched', 'selftest-ed-1.14.1-r0-showdata.dump',
+        self._test_archiver_mode('patched', 'selftest-ed-native-1.14.1-r0-showdata.dump',
                                  'ARCHIVER_MODE[dumpdata] = "1"\n')
 
     def test_archiver_mode_mirror(self):
@@ -255,3 +289,57 @@ class Archiver(OESelftestTestCase):
             glob_str = os.path.join(bb_vars['DEPLOY_DIR_SRC'], 'mirror', target_file_name)
             glob_result = glob.glob(glob_str)
             self.assertTrue(glob_result, 'Missing archive file %s' % (target_file_name))
+
+    def test_archiver_mode_mirror_gitsm(self):
+        """
+        Test that the archiver correctly handles git submodules with
+        `ARCHIVER_MODE[src] = "mirror"`.
+        """
+        features = 'INHERIT += "archiver"\n'
+        features += 'ARCHIVER_MODE[src] = "mirror"\n'
+        features += 'ARCHIVER_MODE[mirror] = "combined"\n'
+        features += 'BB_GENERATE_MIRROR_TARBALLS = "1"\n'
+        features += 'COPYLEFT_LICENSE_INCLUDE = "*"\n'
+        self.write_config(features)
+
+        bitbake('-c clean git-submodule-test')
+        bitbake('-c deploy_archives -f git-submodule-test')
+
+        bb_vars = get_bb_vars(['DEPLOY_DIR_SRC'])
+        for target_file_name in [
+            'git2_git.yoctoproject.org.git-submodule-test.tar.gz',
+            'git2_git.yoctoproject.org.bitbake-gitsm-test1.tar.gz',
+            'git2_git.yoctoproject.org.bitbake-gitsm-test2.tar.gz',
+            'git2_git.openembedded.org.bitbake.tar.gz'
+        ]:
+            target_path = os.path.join(bb_vars['DEPLOY_DIR_SRC'], 'mirror', target_file_name)
+            self.assertTrue(os.path.exists(target_path))
+
+    def test_archiver_mode_mirror_gitsm_shallow(self):
+        """
+        Test that the archiver correctly handles git submodules with
+        `ARCHIVER_MODE[src] = "mirror"`.
+        """
+        features = 'INHERIT += "archiver"\n'
+        features += 'ARCHIVER_MODE[src] = "mirror"\n'
+        features += 'ARCHIVER_MODE[mirror] = "combined"\n'
+        features += 'BB_GENERATE_MIRROR_TARBALLS = "1"\n'
+        features += 'COPYLEFT_LICENSE_INCLUDE = "*"\n'
+        features += 'BB_GIT_SHALLOW = "1"\n'
+        features += 'BB_GENERATE_SHALLOW_TARBALLS = "1"\n'
+        features += 'DL_DIR = "${TOPDIR}/downloads-shallow"\n'
+        self.write_config(features)
+
+        bitbake('-c clean git-submodule-test')
+        bitbake('-c deploy_archives -f git-submodule-test')
+
+        bb_vars = get_bb_vars(['DEPLOY_DIR_SRC'])
+        for target_file_name in [
+            'gitsmshallow_git.yoctoproject.org.git-submodule-test_a2885dd-1_master.tar.gz',
+            'gitsmshallow_git.yoctoproject.org.bitbake-gitsm-test1_bare_120f4c7-1.tar.gz',
+            'gitsmshallow_git.yoctoproject.org.bitbake-gitsm-test2_bare_f66699e-1.tar.gz',
+            'gitsmshallow_git.openembedded.org.bitbake_bare_52a144a-1.tar.gz',
+            'gitsmshallow_git.openembedded.org.bitbake_bare_c39b997-1.tar.gz'
+        ]:
+            target_path = os.path.join(bb_vars['DEPLOY_DIR_SRC'], 'mirror', target_file_name)
+            self.assertTrue(os.path.exists(target_path))

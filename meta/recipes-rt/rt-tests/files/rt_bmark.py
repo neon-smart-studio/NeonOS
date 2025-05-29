@@ -265,7 +265,7 @@ cmd = ("cyclictest",
        "-d", str(interval_delta),
        "-l", str(loop_count)
        )
-rex = re.compile(b"C:\s*(\d+).*Min:\s*(\d+).*Avg:\s*(\d+).*Max:\s*(\d+)")
+rex = re.compile(r"C:\s*(\d+).*Min:\s*(\d+).*Avg:\s*(\d+).*Max:\s*(\d+)")
 
 def run_cyclictest_once():
         res = subprocess.check_output(cmd)
@@ -284,7 +284,7 @@ def run_cyclictest_once():
         avg_cnt = 0
 
         for line in res.splitlines():
-                m = rex.search(line)
+                m = rex.search(line.decode('utf-8'))
                 if m is not None:
                         minlist.append(int(m.group(2)))
                         maxlist.append(int(m.group(4)))

@@ -14,6 +14,7 @@ import sys
 import copy
 import logging
 import logging.config
+import os
 from itertools import groupby
 import bb
 import bb.event
@@ -29,7 +30,9 @@ class BBLogFormatter(logging.Formatter):
     PLAIN = logging.INFO + 1
     VERBNOTE = logging.INFO + 2
     ERROR = logging.ERROR
+    ERRORONCE = logging.ERROR - 1
     WARNING = logging.WARNING
+    WARNONCE = logging.WARNING - 1
     CRITICAL = logging.CRITICAL
 
     levelnames = {
@@ -41,7 +44,9 @@ class BBLogFormatter(logging.Formatter):
         PLAIN  : '',
         VERBNOTE: 'NOTE',
         WARNING : 'WARNING',
+        WARNONCE : 'WARNING',
         ERROR   : 'ERROR',
+        ERRORONCE   : 'ERROR',
         CRITICAL: 'ERROR',
     }
 
@@ -57,7 +62,9 @@ class BBLogFormatter(logging.Formatter):
         PLAIN   : BASECOLOR,
         VERBNOTE: BASECOLOR,
         WARNING : YELLOW,
+        WARNONCE : YELLOW,
         ERROR   : RED,
+        ERRORONCE : RED,
         CRITICAL: RED,
     }
 
@@ -82,10 +89,6 @@ class BBLogFormatter(logging.Formatter):
             msg = logging.Formatter.format(self, record)
         if hasattr(record, 'bb_exc_formatted'):
             msg += '\n' + ''.join(record.bb_exc_formatted)
-        elif hasattr(record, 'bb_exc_info'):
-            etype, value, tb = record.bb_exc_info
-            formatted = bb.exceptions.format_exception(etype, value, tb, limit=5)
-            msg += '\n' + ''.join(formatted)
         return msg
 
     def colorize(self, record):
@@ -119,6 +122,22 @@ class BBLogFilter(object):
         if record.name in self.debug_domains and record.levelno >= self.debug_domains[record.name]:
             return True
         return False
+
+class LogFilterShowOnce(logging.Filter):
+    def __init__(self):
+        self.seen_warnings = set()
+        self.seen_errors = set()
+
+    def filter(self, record):
+        if record.levelno == bb.msg.BBLogFormatter.WARNONCE:
+            if record.msg in self.seen_warnings:
+                return False
+            self.seen_warnings.add(record.msg)
+        if record.levelno == bb.msg.BBLogFormatter.ERRORONCE:
+            if record.msg in self.seen_errors:
+                return False
+            self.seen_errors.add(record.msg)
+        return True
 
 class LogFilterGEQLevel(logging.Filter):
     def __init__(self, level):
@@ -205,8 +224,9 @@ def logger_create(name, output=sys.stderr, level=logging.INFO, preserve_handlers
     """Standalone logger creation function"""
     logger = logging.getLogger(name)
     console = logging.StreamHandler(output)
+    console.addFilter(bb.msg.LogFilterShowOnce())
     format = bb.msg.BBLogFormatter("%(levelname)s: %(message)s")
-    if color == 'always' or (color == 'auto' and output.isatty()):
+    if color == 'always' or (color == 'auto' and output.isatty() and os.environ.get('NO_COLOR', '') == ''):
         format.enable_color()
     console.setFormatter(format)
     if preserve_handlers:
@@ -277,7 +297,7 @@ def setLoggingConfig(defaultconfig, userconfigfile=None):
         with open(os.path.normpath(userconfigfile), 'r') as f:
             if userconfigfile.endswith('.yml') or userconfigfile.endswith('.yaml'):
                 import yaml
-                userconfig = yaml.load(f)
+                userconfig = yaml.safe_load(f)
             elif userconfigfile.endswith('.json') or userconfigfile.endswith('.cfg'):
                 import json
                 userconfig = json.load(f)
@@ -292,9 +312,16 @@ def setLoggingConfig(defaultconfig, userconfigfile=None):
 
     # Convert all level parameters to integers in case users want to use the
     # bitbake defined level names
-    for h in logconfig["handlers"].values():
+    for name, h in logconfig["handlers"].items():
         if "level" in h:
             h["level"] = bb.msg.stringToLevel(h["level"])
+
+        # Every handler needs its own instance of the once filter.
+        once_filter_name = name + ".showonceFilter"
+        logconfig.setdefault("filters", {})[once_filter_name] = {
+            "()": "bb.msg.LogFilterShowOnce",
+        }
+        h.setdefault("filters", []).append(once_filter_name)
 
     for l in logconfig["loggers"].values():
         if "level" in l:

@@ -1,7 +1,7 @@
 SUMMARY = "network auditing tool"
 DESCRIPTION = "Nmap ("Network Mapper") is a free and open source (license) utility for network discovery and security auditing.\nGui support via appending to IMAGE_FEATURES x11-base in local.conf"
 SECTION = "security"
-LICENSE = "GPL-2.0"
+LICENSE = "GPL-2.0-only"
 
 LIC_FILES_CHKSUM = "file://COPYING;beginline=7;endline=12;md5=66938a7e5b4c118eda78271de14874c2"
 
@@ -19,7 +19,7 @@ SRC_URI[sha256sum] = "fcfa5a0e42099e12e4bf7a68ebe6fde05553383a682e816a7ec9256ab4
 
 inherit autotools-brokensep pkgconfig python3native
 
-PACKAGECONFIG ?= "ncat nping ndiff pcap"
+PACKAGECONFIG ?= "ncat nping pcap"
 
 PACKAGECONFIG[pcap] = "--with-pcap=linux, --without-pcap, libpcap, libpcap"
 PACKAGECONFIG[pcre] = "--with-libpcre=${STAGING_LIBDIR}/.., --with-libpcre=included, libpcre"
@@ -49,12 +49,18 @@ do_configure() {
     oe_runconf
 }
 
-do_install_append() {
-    if [ -f "${D}${bindir}/ndiff" ]; then
-       sed -i 's@^#!.*$@#!/usr/bin/env python3@g'   ${D}${bindir}/ndiff
-    fi
+do_install:append() {
+    for f in ndiff uninstall_ndiff; do
+        if [ -f ${D}${bindir}/$f ]; then
+            sed -i 's@^#!.*$@#!/usr/bin/env python3@g' ${D}${bindir}/$f
+        fi
+    done
 }
 
-FILES_${PN} += "${PYTHON_SITEPACKAGES_DIR} ${datadir}/ncat"
+FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR} ${datadir}/ncat"
 
-RDEPENDS_${PN} += "python3-core"
+RDEPENDS:${PN} += " \
+    python3-difflib \
+    python3-asyncio \
+    python3-xml \
+"

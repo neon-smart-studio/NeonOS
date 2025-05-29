@@ -5,98 +5,107 @@ to linux-firmware for general use."
 HOMEPAGE = "https://github.com/RPi-Distro/firmware-nonfree"
 SECTION = "kernel"
 
-# In maintained upstream linux-firmware:
-# * brcmfmac43430-sdio falls under LICENCE.cypress
-# * brcmfmac43455-sdio falls under LICENCE.broadcom_bcm43xx
-#
-# It is likely[^1] that both of these should be under LICENCE.cypress.
-# Further, at this time the text of LICENCE.broadcom_bcm43xx is the same
-# in linux-firmware and RPi-Distro/firmware-nonfree, but this may
-# change.
-#
-# Rather than make assumptions about what's supposed to be what, we'll
-# use the license implied by the source of these files, named to avoid
-# conflicts with linux-firmware.
-#
-# [^1]: https://github.com/RPi-Distro/bluez-firmware/issues/1
-LICENSE = "\
-    Firmware-broadcom_bcm43xx-rpidistro \
-    & WHENCE \
-"
+LICENSE = "GPL-2.0-only & binary-redist-Cypress-rpidistro & Synaptics-rpidistro"
 LIC_FILES_CHKSUM = "\
-    file://LICENCE.broadcom_bcm43xx;md5=3160c14df7228891b868060e1951dfbc \
-    file://WHENCE;md5=7b12b2224438186e4c97c4c7f3a5cc28 \
+    file://debian/copyright;md5=291ee5385b4cf74b10c5fb5a46a7bbc6 \
 "
+# Where these are no common licenses, set NO_GENERIC_LICENSE so that the
+# license files will be copied from the fetched source.
+NO_GENERIC_LICENSE[binary-redist-Cypress-rpidistro] = "debian/copyright"
+NO_GENERIC_LICENSE[Synaptics-rpidistro] = "debian/copyright"
+LICENSE_FLAGS = "synaptics-killswitch"
 
-# These are not common licenses, set NO_GENERIC_LICENSE for them
-# so that the license files will be copied from fetched source
-NO_GENERIC_LICENSE[Firmware-broadcom_bcm43xx-rpidistro] = "LICENCE.broadcom_bcm43xx"
-NO_GENERIC_LICENSE[WHENCE] = "WHENCE"
-
-SRC_URI = "git://github.com/RPi-Distro/firmware-nonfree;branch=buster;protocol=https"
-
-SRCREV = "98e815735e2c805d65994ccc608f399595b74438"
-PV = "20190114-1+rpt8"
-
+SRC_URI = "git://github.com/RPi-Distro/firmware-nonfree;branch=bookworm;protocol=https \
+    file://0001-Default-43455-firmware-to-standard-variant.patch \
+"
+SRCREV = "4b356e134e8333d073bd3802d767a825adec3807"
+PV = "20230625-2+rpt3"
 S = "${WORKDIR}/git"
 
 inherit allarch
 
-CLEANBROKEN = "1"
-
-do_compile() {
-    :
-}
+do_configure[noexec] = "1"
+do_compile[noexec] = "1"
 
 do_install() {
-    install -d ${D}${nonarch_base_libdir}/firmware/brcm
+    install -d ${D}${nonarch_base_libdir}/firmware/brcm ${D}${nonarch_base_libdir}/firmware/cypress
 
-    cp ./LICENCE.broadcom_bcm43xx ${D}${nonarch_base_libdir}/firmware/LICENCE.broadcom_bcm43xx-rpidistro
+    cp debian/copyright ${D}${nonarch_base_libdir}/firmware/copyright.firmware-nonfree-rpidistro
 
-    # Replace outdated linux-firmware files with updated ones from
-    # raspbian firmware-nonfree. Raspbian adds blobs and nvram
-    # definitions that are also necessary so copy those too.
-    for fw in brcmfmac43430-sdio brcmfmac43455-sdio ; do
-        install -m 0644 brcm/${fw}.* ${D}${nonarch_base_libdir}/firmware/brcm/
+    for fw in \
+            brcmfmac43430-sdio \
+            brcmfmac43430b0-sdio \
+            brcmfmac43436-sdio \
+            brcmfmac43436s-sdio \
+            brcmfmac43455-sdio \
+            brcmfmac43456-sdio; do
+        cp -R --no-dereference --preserve=mode,links -v debian/config/brcm80211/brcm/${fw}.* ${D}${nonarch_base_libdir}/firmware/brcm/
     done
-    # add compat links. Fixes errors like
-    # brcmfmac mmc1:0001:1: Direct firmware load for brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt failed with error -2
-    ln -s brcmfmac43455-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt
-    ln -s brcmfmac43455-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-compute-module.txt
-    ln -s brcmfmac43455-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43455-sdio.raspberrypi,3-model-b-plus.txt
-    ln -s brcmfmac43430-sdio.txt ${D}${nonarch_base_libdir}/firmware/brcm/brcmfmac43430-sdio.raspberrypi,3-model-b.txt
+
+    cp -R --no-dereference --preserve=mode,links -v debian/config/brcm80211/cypress/* ${D}${nonarch_base_libdir}/firmware/cypress/
+
+    rm ${D}${nonarch_base_libdir}/firmware/cypress/README.txt
 }
 
 PACKAGES = "\
-    ${PN}-broadcom-license \
     ${PN}-bcm43430 \
+    ${PN}-bcm43436 \
+    ${PN}-bcm43436s \
+    ${PN}-bcm43439 \
     ${PN}-bcm43455 \
+    ${PN}-bcm43456 \
+    ${PN}-license \
 "
 
-LICENSE_${PN}-bcm43430 = "Firmware-broadcom_bcm43xx-rpidistro"
-LICENSE_${PN}-bcm43455 = "Firmware-broadcom_bcm43xx-rpidistro"
-LICENSE_${PN}-broadcom-license = "Firmware-broadcom_bcm43xx-rpidistro"
-FILES_${PN}-broadcom-license = "${nonarch_base_libdir}/firmware/LICENCE.broadcom_bcm43xx-rpidistro"
-FILES_${PN}-bcm43430 = "${nonarch_base_libdir}/firmware/brcm/brcmfmac43430*"
-FILES_${PN}-bcm43455 = "${nonarch_base_libdir}/firmware/brcm/brcmfmac43455*"
-RDEPENDS_${PN}-bcm43430 += "${PN}-broadcom-license"
-RDEPENDS_${PN}-bcm43455 += "${PN}-broadcom-license"
-RCONFLICTS_${PN}-bcm43430 = "\
-    linux-firmware-bcm43430 \
-    linux-firmware-raspbian-bcm43430 \
+LICENSE:${PN}-bcm43430 = "binary-redist-Cypress-rpidistro"
+LICENSE:${PN}-bcm43436 = "Synaptics-rpidistro"
+LICENSE:${PN}-bcm43436s = "Synaptics-rpidistro"
+LICENSE:${PN}-bcm43439 = "Synaptics-rpidistro"
+LICENSE:${PN}-bcm43455 = "binary-redist-Cypress-rpidistro"
+LICENSE:${PN}-bcm43456 = "Synaptics-rpidistro"
+LICENSE:${PN}-license = "GPL-2.0-only"
+
+FILES:${PN}-bcm43430 = " \
+    ${nonarch_base_libdir}/firmware/brcm/brcmfmac43430* \
+    ${nonarch_base_libdir}/firmware/cypress/cyfmac43430-sdio.bin \
+    ${nonarch_base_libdir}/firmware/cypress/cyfmac43430-sdio.clm_blob \
 "
-RREPLACES_${PN}-bcm43430 = "\
-    linux-firmware-bcm43430 \
-    linux-firmware-raspbian-bcm43430 \
+FILES:${PN}-bcm43436 = " \
+    ${nonarch_base_libdir}/firmware/brcm/brcmfmac43436-* \
+    ${nonarch_base_libdir}/firmware/brcm/brcmfmac43430b0-* \
 "
-RCONFLICTS_${PN}-bcm43455 = "\
-    linux-firmware-bcm43455 \
-    linux-firmware-raspbian-bcm43455 \
+FILES:${PN}-bcm43436s = "${nonarch_base_libdir}/firmware/brcm/brcmfmac43436s*"
+FILES:${PN}-bcm43439 = " \
+    ${nonarch_base_libdir}/firmware/cypress/43439A0-7.95.49.00.combined \
+    ${nonarch_base_libdir}/firmware/cypress/cyfmac43439-sdio* \
 "
-RREPLACES_${PN}-bcm43455 = "\
-    linux-firmware-bcm43455 \
-    linux-firmware-raspbian-bcm43455 \
+FILES:${PN}-bcm43455 = " \
+    ${nonarch_base_libdir}/firmware/brcm/brcmfmac43455* \
+    ${nonarch_base_libdir}/firmware/cypress/cyfmac43455-sdio* \
 "
+FILES:${PN}-bcm43456 = "${nonarch_base_libdir}/firmware/brcm/brcmfmac43456*"
+FILES:${PN}-license = "${nonarch_base_libdir}/firmware/copyright.firmware-nonfree-rpidistro"
+
+RDEPENDS:${PN}-bcm43430 += "${PN}-license"
+RDEPENDS:${PN}-bcm43436 += "${PN}-license"
+RDEPENDS:${PN}-bcm43436s += "${PN}-license"
+RDEPENDS:${PN}-bcm43439 += "${PN}-license"
+RDEPENDS:${PN}-bcm43455 += "${PN}-license"
+RDEPENDS:${PN}-bcm43456 += "${PN}-license"
+
+RCONFLICTS:${PN}-bcm43430 = "linux-firmware-raspbian-bcm43430"
+RCONFLICTS:${PN}-bcm43436 = "linux-firmware-bcm43436"
+RCONFLICTS:${PN}-bcm43436s = "linux-firmware-bcm43436s"
+RCONFLICTS:${PN}-bcm43439 = "linux-firmware-bcm43439"
+RCONFLICTS:${PN}-bcm43455 = "linux-firmware-bcm43455"
+RCONFLICTS:${PN}-bcm43456 = "linux-firmware-bcm43456"
+
+RREPLACES:${PN}-bcm43430 = "linux-firmware-bcm43430"
+RREPLACES:${PN}-bcm43436 = "linux-firmware-bcm43436"
+RREPLACES:${PN}-bcm43436s = "linux-firmware-bcm43436s"
+RREPLACES:${PN}-bcm43439 = "linux-firmware-bcm43439"
+RREPLACES:${PN}-bcm43455 = "linux-firmware-bcm43455"
+RREPLACES:${PN}-bcm43456 = "linux-firmware-bcm43456"
 
 # Firmware files are generally not run on the CPU, so they can be
 # allarch despite being architecture specific

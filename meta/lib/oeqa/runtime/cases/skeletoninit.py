@@ -1,10 +1,12 @@
 #
+# Copyright OpenEmbedded Contributors
+#
 # SPDX-License-Identifier: MIT
 #
 
 # This test should cover https://bugzilla.yoctoproject.org/tr_show_case.cgi?case_id=284
 # testcase. Image under test must have meta-skeleton layer in bblayers and
-# IMAGE_INSTALL_append = " service" in local.conf
+# IMAGE_INSTALL:append = " service" in local.conf
 from oeqa.runtime.case import OERuntimeTestCase
 from oeqa.core.decorator.depends import OETestDepends
 from oeqa.core.decorator.data import skipIfDataVar
@@ -15,7 +17,7 @@ class SkeletonBasicTest(OERuntimeTestCase):
     @OETestDepends(['ssh.SSHTest.test_ssh'])
     @OEHasPackage(['service'])
     @skipIfDataVar('VIRTUAL-RUNTIME_init_manager', 'systemd',
-                   'Not appropiate for systemd image')
+                   'Not appropriate for systemd image')
     def test_skeleton_availability(self):
         status, output = self.target.run('ls /etc/init.d/skeleton')
         msg = 'skeleton init script not found. Output:\n%s' % output

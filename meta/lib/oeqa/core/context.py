@@ -81,7 +81,7 @@ class OETestContext(object):
     def runTests(self, processes=None, skips=[]):
         self.runner = self.runnerClass(self, descriptions=False, verbosity=2)
 
-        # Dinamically skip those tests specified though arguments
+        # Dynamically skip those tests specified though arguments
         self.skipTests(skips)
 
         self._run_start_time = time.time()
@@ -160,6 +160,8 @@ class OETestContextExecutor(object):
         fh = logging.FileHandler(args.output_log)
         fh.setFormatter(formatter)
         logger.addHandler(fh)
+        if getattr(args, 'verbose', False):
+            logger.setLevel('DEBUG')
 
         return logger
 

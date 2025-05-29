@@ -48,6 +48,8 @@ import bb
 import xmlrpc.client
 from bb.ui import uihelper
 
+logger = logging.getLogger(__name__)
+
 parsespin = itertools.cycle( r'|/-\\' )
 
 X = 0
@@ -225,6 +227,9 @@ class NCursesUI:
         shutdown = 0
 
         try:
+            if not params.observe_only:
+                params.updateToServer(server, os.environ.copy())
+
             params.updateFromServer(server)
             cmdline = params.parseActions()
             if not cmdline:

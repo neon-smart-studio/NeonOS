@@ -1,4 +1,5 @@
 # Simple initramfs image artifact generation for tiny images.
+SUMMARY = "Tiny image capable of booting a device."
 DESCRIPTION = "Tiny image capable of booting a device. The kernel includes \
 the Minimal RAM-based Initial Root Filesystem (initramfs), which finds the \
 first 'init' program more efficiently. core-image-tiny-initramfs doesn't \
@@ -12,7 +13,7 @@ PACKAGE_INSTALL = "initramfs-live-boot-tiny packagegroup-core-boot dropbear ${VI
 # Do not pollute the initrd image with rootfs features
 IMAGE_FEATURES = ""
 
-export IMAGE_BASENAME = "core-image-tiny-initramfs"
+IMAGE_NAME_SUFFIX ?= ""
 IMAGE_LINGUAS = ""
 
 LICENSE = "MIT"
@@ -26,7 +27,7 @@ IMAGE_ROOTFS_SIZE = "8192"
 IMAGE_ROOTFS_EXTRA_SPACE = "0"
 
 # Use the same restriction as initramfs-live-install
-COMPATIBLE_HOST = "(i.86|x86_64).*-linux"
+COMPATIBLE_HOST = "(i.86|x86_64|aarch64|arm).*-linux"
 
 python tinyinitrd () {
   # Modify our init file so the user knows we drop to shell prompt on purpose
@@ -38,6 +39,6 @@ python tinyinitrd () {
     init.write(newinit)
 }
 
-IMAGE_PREPROCESS_COMMAND += "tinyinitrd;"
+IMAGE_PREPROCESS_COMMAND += "tinyinitrd"
 
 QB_KERNEL_CMDLINE_APPEND += "debugshell=3 init=/bin/busybox sh init"

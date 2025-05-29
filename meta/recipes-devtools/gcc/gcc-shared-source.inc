@@ -9,6 +9,13 @@ SRC_URI = ""
 
 do_configure[depends] += "gcc-source-${PV}:do_preconfigure"
 do_populate_lic[depends] += "gcc-source-${PV}:do_unpack"
+do_deploy_source_date_epoch[depends] += "gcc-source-${PV}:do_deploy_source_date_epoch"
 
-# patch is available via gcc-source recipe
-CVE_CHECK_WHITELIST += "CVE-2023-4039"
+# Copy the SDE from the shared workdir to the recipe workdir
+do_deploy_source_date_epoch () {
+	sde_file=${SDE_FILE}
+	sde_file=${sde_file#${WORKDIR}/}
+	mkdir -p ${SDE_DEPLOYDIR} $(dirname ${SDE_FILE})
+	cp -p $(dirname ${S})/$sde_file ${SDE_DEPLOYDIR}
+	cp -p $(dirname ${S})/$sde_file ${SDE_FILE}
+}

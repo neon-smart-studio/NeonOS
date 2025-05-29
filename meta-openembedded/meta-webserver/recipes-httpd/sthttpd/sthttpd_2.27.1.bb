@@ -8,6 +8,7 @@ DEPENDS += "base-passwd virtual/crypt"
 
 SRCREV = "2845bf5bff2b820d2336c8c8061cbfc5f271e720"
 SRC_URI = "git://github.com/blueness/${BPN};branch=master;protocol=https \
+           file://0001-Define-_GNU_SOURCE-if-HAVE_SIGSET-is-set.patch \
            file://thttpd.service \
            file://thttpd.conf \
            file://init"
@@ -20,7 +21,7 @@ S = "${WORKDIR}/git"
 inherit autotools update-rc.d systemd update-alternatives
 
 ALTERNATIVE_PRIORITY = "100"
-ALTERNATIVE_${PN}-doc = "htpasswd.1"
+ALTERNATIVE:${PN}-doc = "htpasswd.1"
 ALTERNATIVE_LINK_NAME[htpasswd.1] = "${mandir}/man1/htpasswd.1"
 
 SRV_DIR ?= "${servicedir}/www"
@@ -29,12 +30,12 @@ SRV_DIR ?= "${servicedir}/www"
 # but ${SRV_DIR} is not installed chgrp'd to the group by default.
 WEBGROUP ?= "www-data"
 
-do_configure_prepend () {
+do_configure:prepend () {
     export WEBDIR=${SRV_DIR}
     export WEBGROUP=${WEBGROUP}
 }
 
-do_install_append () {
+do_install:append () {
     install -d ${D}${sysconfdir}/init.d
     install -c -m 755 ${WORKDIR}/init ${D}${sysconfdir}/init.d/thttpd
     install -c -m 755 ${WORKDIR}/thttpd.conf ${D}${sysconfdir}
@@ -52,7 +53,9 @@ do_install_append () {
 INITSCRIPT_NAME = "thttpd"
 INITSCRIPT_PARAMS = "defaults"
 
-SYSTEMD_SERVICE_${PN} = "thttpd.service"
+SYSTEMD_SERVICE:${PN} = "thttpd.service"
 
-FILES_${PN} += "${SRV_DIR}"
-FILES_${PN}-dbg += "${SRV_DIR}/cgi-bin/.debug"
+FILES:${PN} += "${SRV_DIR}"
+FILES:${PN}-dbg += "${SRV_DIR}/cgi-bin/.debug"
+
+CVE_STATUS[CVE-2017-10671] = "fixed-version: No action required. The current version (2.27.1) is not affected by the CVE."

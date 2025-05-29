@@ -12,12 +12,10 @@ Signed-off-by: Khem Raj <raj.khem@gmail.com>
  usr/klibc/Kbuild | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
-diff --git a/usr/klibc/Kbuild b/usr/klibc/Kbuild
-index 98caf2e9..b34521e0 100644
 --- a/usr/klibc/Kbuild
 +++ b/usr/klibc/Kbuild
-@@ -168,7 +168,8 @@ $(SOHASH): $(SOLIB) $(SOLIB).hash
- targets += interp.o
+@@ -190,7 +190,8 @@ $(SOHASH): $(SOLIB) $(SOLIB).hash
+ targets += shared-stub.o
  
  quiet_cmd_interp = BUILD   $@
 -      cmd_interp = $(KLIBCCC) $(klibccflags) -D__ASSEMBLY__     \

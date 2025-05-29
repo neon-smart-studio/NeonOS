@@ -10,6 +10,7 @@
 import logging
 import os
 import sys
+import time
 import atexit
 import re
 from collections import OrderedDict, defaultdict
@@ -22,7 +23,6 @@ import bb.taskdata
 import bb.utils
 import bb.command
 import bb.remotedata
-from bb.cookerdata import CookerConfiguration
 from bb.main import setup_bitbake, BitBakeConfigParameters
 import bb.fetch2
 
@@ -121,15 +121,16 @@ class TinfoilCookerAdapter:
 
     class TinfoilCookerCollectionAdapter:
         """ cooker.collection adapter """
-        def __init__(self, tinfoil):
+        def __init__(self, tinfoil, mc=''):
             self.tinfoil = tinfoil
+            self.mc = mc
         def get_file_appends(self, fn):
-            return self.tinfoil.get_file_appends(fn)
+            return self.tinfoil.get_file_appends(fn, self.mc)
         def __getattr__(self, name):
             if name == 'overlayed':
-                return self.tinfoil.get_overlayed_recipes()
+                return self.tinfoil.get_overlayed_recipes(self.mc)
             elif name == 'bbappends':
-                return self.tinfoil.run_command('getAllAppends')
+                return self.tinfoil.run_command('getAllAppends', self.mc)
             else:
                 raise AttributeError("%s instance has no attribute '%s'" % (self.__class__.__name__, name))
 
@@ -187,20 +188,27 @@ class TinfoilCookerAdapter:
             self._cache[name] = attrvalue
             return attrvalue
 
+    class TinfoilSkiplistByMcAdapter:
+        def __init__(self, tinfoil):
+            self.tinfoil = tinfoil
+
+        def __getitem__(self, mc):
+            return self.tinfoil.get_skipped_recipes(mc)
+
     def __init__(self, tinfoil):
         self.tinfoil = tinfoil
-        self.collection = self.TinfoilCookerCollectionAdapter(tinfoil)
+        self.multiconfigs = [''] + (tinfoil.config_data.getVar('BBMULTICONFIG') or '').split()
+        self.collections = {}
         self.recipecaches = {}
-        self.recipecaches[''] = self.TinfoilRecipeCacheAdapter(tinfoil)
-        for mc in (tinfoil.config_data.getVar('BBMULTICONFIG') or '').split():
+        self.skiplist_by_mc = self.TinfoilSkiplistByMcAdapter(tinfoil)
+        for mc in self.multiconfigs:
+            self.collections[mc] = self.TinfoilCookerCollectionAdapter(tinfoil, mc)
             self.recipecaches[mc] = self.TinfoilRecipeCacheAdapter(tinfoil, mc)
         self._cache = {}
     def __getattr__(self, name):
         # Grab these only when they are requested since they aren't always used
         if name in self._cache:
             return self._cache[name]
-        elif name == 'skiplist':
-            attrvalue = self.tinfoil.get_skipped_recipes()
         elif name == 'bbfile_config_priorities':
             ret = self.tinfoil.run_command('getLayerPriorities')
             bbfile_config_priorities = []
@@ -323,11 +331,11 @@ class Tinfoil:
         self.recipes_parsed = False
         self.quiet = 0
         self.oldhandlers = self.logger.handlers[:]
+        self.localhandlers = []
         if setup_logging:
             # This is the *client-side* logger, nothing to do with
             # logging messages from the server
             bb.msg.logger_create('BitBake', output)
-            self.localhandlers = []
             for handler in self.logger.handlers:
                 if handler not in self.oldhandlers:
                     self.localhandlers.append(handler)
@@ -383,18 +391,13 @@ class Tinfoil:
         if not config_params:
             config_params = TinfoilConfigParameters(config_only=config_only, quiet=quiet)
 
-        cookerconfig = CookerConfiguration()
-        cookerconfig.setConfigParameters(config_params)
-
         if not config_only:
             # Disable local loggers because the UI module is going to set up its own
             for handler in self.localhandlers:
                 self.logger.handlers.remove(handler)
             self.localhandlers = []
 
-        self.server_connection, ui_module = setup_bitbake(config_params,
-                            cookerconfig,
-                            extrafeatures)
+        self.server_connection, ui_module = setup_bitbake(config_params, extrafeatures)
 
         self.ui_module = ui_module
 
@@ -448,9 +451,15 @@ class Tinfoil:
         to initialise Tinfoil and use it with config_only=True first and
         then conditionally call this function to parse recipes later.
         """
-        config_params = TinfoilConfigParameters(config_only=False)
+        config_params = TinfoilConfigParameters(config_only=False, quiet=self.quiet)
         self.run_actions(config_params)
         self.recipes_parsed = True
+
+    def modified_files(self):
+        """
+        Notify the server it needs to revalidate it's caches since the client has modified files
+        """
+        self.run_command("revalidateCaches")
 
     def run_command(self, command, *params, handle_events=True):
         """
@@ -497,7 +506,7 @@ class Tinfoil:
         Wait for an event from the server for the specified time.
         A timeout of 0 means don't wait if there are no events in the queue.
         Returns the next event in the queue or None if the timeout was
-        reached. Note that in order to recieve any events you will
+        reached. Note that in order to receive any events you will
         first need to set the internal event mask using set_event_mask()
         (otherwise whatever event mask the UI set up will be in effect).
         """
@@ -505,18 +514,18 @@ class Tinfoil:
             raise Exception('Not connected to server (did you call .prepare()?)')
         return self.server_connection.events.waitEvent(timeout)
 
-    def get_overlayed_recipes(self):
+    def get_overlayed_recipes(self, mc=''):
         """
         Find recipes which are overlayed (i.e. where recipes exist in multiple layers)
         """
-        return defaultdict(list, self.run_command('getOverlayedRecipes'))
+        return defaultdict(list, self.run_command('getOverlayedRecipes', mc))
 
-    def get_skipped_recipes(self):
+    def get_skipped_recipes(self, mc=''):
         """
         Find recipes which were skipped (i.e. SkipRecipe was raised
         during parsing).
         """
-        return OrderedDict(self.run_command('getSkippedRecipes'))
+        return OrderedDict(self.run_command('getSkippedRecipes', mc))
 
     def get_all_providers(self, mc=''):
         return defaultdict(list, self.run_command('allProviders', mc))
@@ -530,6 +539,7 @@ class Tinfoil:
     def get_runtime_providers(self, rdep):
         return self.run_command('getRuntimeProviders', rdep)
 
+    # TODO: teach this method about mc
     def get_recipe_file(self, pn):
         """
         Get the file name for the specified recipe/target. Raises
@@ -538,6 +548,7 @@ class Tinfoil:
         """
         best = self.find_best_provider(pn)
         if not best or (len(best) > 3 and not best[3]):
+            # TODO: pass down mc
             skiplist = self.get_skipped_recipes()
             taskdata = bb.taskdata.TaskData(None, skiplist=skiplist)
             skipreasons = taskdata.get_reasons(pn)
@@ -547,11 +558,11 @@ class Tinfoil:
                 raise bb.providers.NoProvider('Unable to find any recipe file matching "%s"' % pn)
         return best[3]
 
-    def get_file_appends(self, fn):
+    def get_file_appends(self, fn, mc=''):
         """
         Find the bbappends for a recipe file
         """
-        return self.run_command('getFileAppends', fn)
+        return self.run_command('getFileAppends', fn, mc)
 
     def all_recipes(self, mc='', sort=True):
         """
@@ -733,6 +744,7 @@ class Tinfoil:
 
         ret = self.run_command('buildTargets', targets, task)
         if handle_events:
+            lastevent = time.time()
             result = False
             # Borrowed from knotty, instead somewhat hackily we use the helper
             # as the object to store "shutdown" on
@@ -745,11 +757,12 @@ class Tinfoil:
                     try:
                         event = self.wait_event(0.25)
                         if event:
+                            lastevent = time.time()
                             if event_callback and event_callback(event):
                                 continue
                             if helper.eventHandler(event):
                                 if isinstance(event, bb.build.TaskFailedSilent):
-                                    logger.warning("Logfile for failed setscene task is %s" % event.logfile)
+                                    self.logger.warning("Logfile for failed setscene task is %s" % event.logfile)
                                 elif isinstance(event, bb.build.TaskFailed):
                                     bb.ui.knotty.print_event_log(event, includelogs, loglines, termfilter)
                                 continue
@@ -765,7 +778,7 @@ class Tinfoil:
                                 if parseprogress:
                                     parseprogress.update(event.progress)
                                 else:
-                                    bb.warn("Got ProcessProgress event for someting that never started?")
+                                    bb.warn("Got ProcessProgress event for something that never started?")
                                 continue
                             if isinstance(event, bb.event.ProcessFinished):
                                 if self.quiet > 1:
@@ -777,7 +790,7 @@ class Tinfoil:
                             if isinstance(event, bb.command.CommandCompleted):
                                 result = True
                                 break
-                            if isinstance(event, bb.command.CommandFailed):
+                            if isinstance(event, (bb.command.CommandFailed, bb.command.CommandExit)):
                                 self.logger.error(str(event))
                                 result = False
                                 break
@@ -789,10 +802,13 @@ class Tinfoil:
                                 self.logger.error(str(event))
                                 result = False
                                 break
-
                         elif helper.shutdown > 1:
                             break
                         termfilter.updateFooter()
+                        if time.time() > (lastevent + (3*60)):
+                            if not self.run_command('ping', handle_events=False):
+                                print("\nUnable to ping server and no events, closing down...\n")
+                                return False
                     except KeyboardInterrupt:
                         termfilter.clearFooter()
                         if helper.shutdown == 1:
@@ -823,18 +839,22 @@ class Tinfoil:
         prepare() has been called, or use a with... block when you create
         the tinfoil object which will ensure that it gets called.
         """
-        if self.server_connection:
-            self.run_command('clientComplete')
-            _server_connections.remove(self.server_connection)
-            bb.event.ui_queue = []
-            self.server_connection.terminate()
-            self.server_connection = None
+        try:
+            if self.server_connection:
+                try:
+                    self.run_command('clientComplete')
+                finally:
+                    _server_connections.remove(self.server_connection)
+                    bb.event.ui_queue = []
+                    self.server_connection.terminate()
+                    self.server_connection = None
 
-        # Restore logging handlers to how it looked when we started
-        if self.oldhandlers:
-            for handler in self.logger.handlers:
-                if handler not in self.oldhandlers:
-                    self.logger.handlers.remove(handler)
+        finally:
+            # Restore logging handlers to how it looked when we started
+            if self.oldhandlers:
+                for handler in self.logger.handlers:
+                    if handler not in self.oldhandlers:
+                        self.logger.handlers.remove(handler)
 
     def _reconvert_type(self, obj, origtypename):
         """

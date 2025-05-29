@@ -22,16 +22,17 @@ SRC_URI = " \
     file://nginx-volatile.conf \
     file://nginx.service \
     file://nginx-fix-pidfile.patch \
-    file://CVE-2021-23017.patch \
-    file://CVE-2021-3618.patch \
+    file://0001-configure-libxslt-conf.patch \
+    file://CVE-2024-7347-1.patch \
+    file://CVE-2024-7347-2.patch \
 "
 
 inherit siteinfo update-rc.d useradd systemd
 
-SYSTEMD_SERVICE_${PN} = "nginx.service"
+SYSTEMD_SERVICE:${PN} = "nginx.service"
 
-CFLAGS_append = " -fPIE -pie"
-CXXFLAGS_append = " -fPIE -pie"
+CFLAGS:append = " -fPIE -pie"
+CXXFLAGS:append = " -fPIE -pie"
 
 NGINX_WWWDIR ?= "${localstatedir}/www/localhost"
 NGINX_USER   ?= "www"
@@ -39,11 +40,18 @@ NGINX_USER   ?= "www"
 EXTRA_OECONF = ""
 DISABLE_STATIC = ""
 
-PACKAGECONFIG ??= "ssl"
+PACKAGECONFIG ??= "ssl ${@bb.utils.filter('DISTRO_FEATURES', 'ipv6', d)}"
 
+PACKAGECONFIG[gunzip] = "--with-http_gunzip_module,,"
 PACKAGECONFIG[http2] = "--with-http_v2_module,,"
 PACKAGECONFIG[ssl] = "--with-http_ssl_module,,openssl"
 PACKAGECONFIG[http-auth-request] = "--with-http_auth_request_module,,"
+PACKAGECONFIG[ipv6] = "--with-ipv6,,"
+PACKAGECONFIG[webdav] = "--with-http_dav_module,,"
+PACKAGECONFIG[stream] = "--with-stream,,"
+PACKAGECONFIG[http-sub-module] = "--with-http_sub_module,,"
+
+PACKAGECONFIG[xslt] = "--with-http_xslt_module,,libxslt"
 
 do_configure () {
     if [ "${SITEINFO_BITS}" = "64" ]; then
@@ -67,7 +75,7 @@ do_configure () {
     --with-ptr-size=${PTRSIZE} \
     --with-sig-atomic-t=${PTRSIZE} \
     --with-size-t=${PTRSIZE} \
-    --with-off-t=${PTRSIZE} \
+    --with-off-t=8 \
     --with-time-t=${PTRSIZE} \
     --with-sys-nerr=132 \
     --conf-path=${sysconfdir}/nginx/nginx.conf \
@@ -96,7 +104,7 @@ do_install () {
             >> ${D}${sysconfdir}/tmpfiles.d/${BPN}.conf
     fi
     install -d ${D}${sysconfdir}/${BPN}
-    lnr ${D}${localstatedir}/run/${BPN} ${D}${sysconfdir}/${BPN}/run
+    ln -rs ${D}${localstatedir}/run/${BPN} ${D}${sysconfdir}/${BPN}/run
     install -d ${D}${NGINX_WWWDIR}
     mv ${D}${exec_prefix}/html ${D}${NGINX_WWWDIR}/
     chown ${NGINX_USER}:www-data -R ${D}${NGINX_WWWDIR}
@@ -145,9 +153,9 @@ do_install () {
     rm -rf ${D}${localstatedir}/log/
 }
 
-pkg_postinst_${PN} () {
+pkg_postinst:${PN} () {
     if [ -z "$D" ]; then
-        if type systemd-tmpfiles >/dev/null; then
+        if type systemd-tmpfiles >/dev/null 2>&1; then
             systemd-tmpfiles --create
         elif [ -e ${sysconfdir}/init.d/populate-volatile.sh ]; then
             ${sysconfdir}/init.d/populate-volatile.sh update
@@ -155,12 +163,12 @@ pkg_postinst_${PN} () {
     fi
 }
 
-FILES_${PN} += " \
+FILES:${PN} += " \
     ${localstatedir}/ \
     ${systemd_unitdir}/system/nginx.service \
 "
 
-CONFFILES_${PN} = " \
+CONFFILES:${PN} = " \
     ${sysconfdir}/nginx/nginx.conf \
     ${sysconfdir}/nginx/fastcgi.conf \
     ${sysconfdir}/nginx/fastcgi_params \
@@ -176,8 +184,9 @@ INITSCRIPT_NAME = "nginx"
 INITSCRIPT_PARAMS = "defaults 92 20"
 
 USERADD_PACKAGES = "${PN}"
-USERADD_PARAM_${PN} = " \
+USERADD_PARAM:${PN} = " \
     --system --no-create-home \
     --home ${NGINX_WWWDIR} \
     --groups www-data \
+    --shell ${base_sbindir}/nologin \
     --user-group ${NGINX_USER}"

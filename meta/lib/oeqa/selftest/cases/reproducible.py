@@ -9,56 +9,15 @@ import bb.utils
 import functools
 import multiprocessing
 import textwrap
-import json
-import unittest
 import tempfile
 import shutil
 import stat
 import os
 import datetime
 
-# For sample packages, see:
-# https://autobuilder.yocto.io/pub/repro-fail/oe-reproducible-20201127-0t7wr_oo/
-# https://autobuilder.yocto.io/pub/repro-fail/oe-reproducible-20201127-4s9ejwyp/
-# https://autobuilder.yocto.io/pub/repro-fail/oe-reproducible-20201127-haiwdlbr/
-# https://autobuilder.yocto.io/pub/repro-fail/oe-reproducible-20201127-hwds3mcl/
-# https://autobuilder.yocto.io/pub/repro-fail/oe-reproducible-20201203-sua0pzvc/
-# (both packages/ and packages-excluded/)
 exclude_packages = [
-	'acpica-src',
-	'babeltrace2-ptest',
-	'bind',
-	'bootchart2-doc',
-	'epiphany',
-	'gcr',
-	'glide',
-	'go-dep',
-	'go-helloworld',
-	'go-runtime',
-	'go_',
-	'gstreamer1.0-python',
-	'hwlatdetect',
-        'kernel-devsrc',
-	'libcap-ng',
-	'libjson',
-	'libproxy',
-	'lttng-tools-dbg',
-	'lttng-tools-ptest',
-	'ltp',
-	'ovmf-shell-efi',
-	'parted-ptest',
-	'perf',
-	'piglit',
-	'pybootchartgui',
-	'qemu',
-	'quilt-ptest',
-	'rsync',
-	'ruby',
-	'stress-ng',
-	'systemd-bootchart',
-	'systemtap',
-	'valgrind-ptest',
-	'webkitgtk',
+       'rust-rustdoc',
+       'rust-dbg'
 	]
 
 def is_excluded(package):
@@ -86,13 +45,14 @@ class CompareResult(object):
         return (self.status, self.test) < (other.status, other.test)
 
 class PackageCompareResults(object):
-    def __init__(self):
+    def __init__(self, exclusions):
         self.total = []
         self.missing = []
         self.different = []
         self.different_excluded = []
         self.same = []
         self.active_exclusions = set()
+        exclude_packages.extend((exclusions or "").split())
 
     def add_result(self, r):
         self.total.append(r)
@@ -139,8 +99,9 @@ def compare_file(reference, test, diffutils_sysroot):
     result.status = SAME
     return result
 
-def run_diffoscope(a_dir, b_dir, html_dir, **kwargs):
-    return runCmd(['diffoscope', '--no-default-limits', '--exclude-directory-metadata', 'yes', '--html-dir', html_dir, a_dir, b_dir],
+def run_diffoscope(a_dir, b_dir, html_dir, max_report_size=0, **kwargs):
+    return runCmd(['diffoscope', '--no-default-limits', '--max-report-size', str(max_report_size),
+                   '--exclude-directory-metadata', 'yes', '--html-dir', html_dir, a_dir, b_dir],
                 **kwargs)
 
 class DiffoscopeTests(OESelftestTestCase):
@@ -168,12 +129,18 @@ class DiffoscopeTests(OESelftestTestCase):
 class ReproducibleTests(OESelftestTestCase):
     # Test the reproducibility of whatever is built between sstate_targets and targets
 
-    package_classes = ['deb', 'ipk']
+    package_classes = ['deb', 'ipk', 'rpm']
+
+    # Maximum report size, in bytes
+    max_report_size = 250 * 1024 * 1024
 
     # targets are the things we want to test the reproducibility of
-    targets = ['core-image-minimal', 'core-image-sato', 'core-image-full-cmdline', 'world']
+    # Have to add the virtual targets manually for now as builds may or may not include them as they're exclude from world
+    targets = ['core-image-minimal', 'core-image-sato', 'core-image-full-cmdline', 'core-image-weston', 'world', 'virtual/librpc', 'virtual/libsdl2', 'virtual/crypt']
+
     # sstate targets are things to pull from sstate to potentially cut build/debugging time
     sstate_targets = []
+
     save_results = False
     if 'OEQA_DEBUGGING_SAVED_OUTPUT' in os.environ:
         save_results = os.environ['OEQA_DEBUGGING_SAVED_OUTPUT']
@@ -188,20 +155,34 @@ class ReproducibleTests(OESelftestTestCase):
 
     def setUpLocal(self):
         super().setUpLocal()
-        needed_vars = ['TOPDIR', 'TARGET_PREFIX', 'BB_NUMBER_THREADS', 'BB_HASHSERVE']
+        needed_vars = [
+            'TOPDIR',
+            'TARGET_PREFIX',
+            'BB_NUMBER_THREADS',
+            'BB_HASHSERVE',
+            'OEQA_REPRODUCIBLE_TEST_PACKAGE',
+            'OEQA_REPRODUCIBLE_TEST_TARGET',
+            'OEQA_REPRODUCIBLE_TEST_SSTATE_TARGETS',
+            'OEQA_REPRODUCIBLE_EXCLUDED_PACKAGES',
+        ]
         bb_vars = get_bb_vars(needed_vars)
         for v in needed_vars:
             setattr(self, v.lower(), bb_vars[v])
 
+        if bb_vars['OEQA_REPRODUCIBLE_TEST_PACKAGE']:
+            self.package_classes = bb_vars['OEQA_REPRODUCIBLE_TEST_PACKAGE'].split()
+
+        if bb_vars['OEQA_REPRODUCIBLE_TEST_TARGET']:
+            self.targets = bb_vars['OEQA_REPRODUCIBLE_TEST_TARGET'].split()
+
+        if bb_vars['OEQA_REPRODUCIBLE_TEST_SSTATE_TARGETS']:
+            self.sstate_targets = bb_vars['OEQA_REPRODUCIBLE_TEST_SSTATE_TARGETS'].split()
+
         self.extraresults = {}
-        self.extraresults.setdefault('reproducible.rawlogs', {})['log'] = ''
         self.extraresults.setdefault('reproducible', {}).setdefault('files', {})
 
-    def append_to_log(self, msg):
-        self.extraresults['reproducible.rawlogs']['log'] += msg
-
     def compare_packages(self, reference_dir, test_dir, diffutils_sysroot):
-        result = PackageCompareResults()
+        result = PackageCompareResults(self.oeqa_reproducible_excluded_packages)
 
         old_cwd = os.getcwd()
         try:
@@ -226,7 +207,7 @@ class ReproducibleTests(OESelftestTestCase):
 
     def write_package_list(self, package_class, name, packages):
         self.extraresults['reproducible']['files'].setdefault(package_class, {})[name] = [
-                {'reference': p.reference, 'test': p.test} for p in packages]
+                p.reference.split("/./")[1] for p in packages]
 
     def copy_file(self, source, dest):
         bb.utils.mkdirhier(os.path.dirname(dest))
@@ -240,12 +221,14 @@ class ReproducibleTests(OESelftestTestCase):
             bb.utils.remove(tmpdir, recurse=True)
 
         config = textwrap.dedent('''\
-            INHERIT += "reproducible_build"
             PACKAGE_CLASSES = "{package_classes}"
-            INHIBIT_PACKAGE_STRIP = "1"
             TMPDIR = "{tmpdir}"
-            LICENSE_FLAGS_WHITELIST = "commercial"
-            DISTRO_FEATURES_append = ' systemd pam'
+            LICENSE_FLAGS_ACCEPTED = "commercial"
+            DISTRO_FEATURES:append = ' pam'
+            USERADDEXTENSION = "useradd-staticids"
+            USERADD_ERROR_DYNAMIC = "skip"
+            USERADD_UID_TABLES += "files/static-passwd"
+            USERADD_GID_TABLES += "files/static-group"
             ''').format(package_classes=' '.join('package_%s' % c for c in self.package_classes),
                         tmpdir=tmpdir)
 
@@ -310,8 +293,6 @@ class ReproducibleTests(OESelftestTestCase):
 
                 self.logger.info('Reproducibility summary for %s: %s' % (c, result))
 
-                self.append_to_log('\n'.join("%s: %s" % (r.status, r.test) for r in result.total))
-
                 self.write_package_list(package_class, 'missing', result.missing)
                 self.write_package_list(package_class, 'different', result.different)
                 self.write_package_list(package_class, 'different_excluded', result.different_excluded)
@@ -326,9 +307,13 @@ class ReproducibleTests(OESelftestTestCase):
                         self.copy_file(d.reference, '/'.join([save_dir, 'packages-excluded', strip_topdir(d.reference)]))
                         self.copy_file(d.test, '/'.join([save_dir, 'packages-excluded', strip_topdir(d.test)]))
 
-                if result.missing or result.different:
-                    fails.append("The following %s packages are missing or different and not in exclusion list: %s" %
-                            (c, '\n'.join(r.test for r in (result.missing + result.different))))
+                if result.different:
+                    fails.append("The following %s packages are different and not in exclusion list:\n%s" %
+                            (c, '\n'.join(r.test for r in (result.different))))
+
+                if result.missing and len(self.sstate_targets) == 0:
+                    fails.append("The following %s packages are missing and not in exclusion list:\n%s" %
+                            (c, '\n'.join(r.test for r in (result.missing))))
 
         # Clean up empty directories
         if self.save_results:
@@ -342,7 +327,7 @@ class ReproducibleTests(OESelftestTestCase):
                 # Copy jquery to improve the diffoscope output usability
                 self.copy_file(os.path.join(jquery_sysroot, 'usr/share/javascript/jquery/jquery.min.js'), os.path.join(package_html_dir, 'jquery.js'))
 
-                run_diffoscope('reproducibleA', 'reproducibleB', package_html_dir,
+                run_diffoscope('reproducibleA', 'reproducibleB', package_html_dir, max_report_size=self.max_report_size,
                         native_sysroot=diffoscope_sysroot, ignore_status=True, cwd=package_dir)
 
         if fails:

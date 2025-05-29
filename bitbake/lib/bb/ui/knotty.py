@@ -21,10 +21,11 @@ import fcntl
 import struct
 import copy
 import atexit
+from itertools import groupby
 
 from bb.ui import uihelper
 
-featureSet = [bb.cooker.CookerFeatures.SEND_SANITYEVENTS]
+featureSet = [bb.cooker.CookerFeatures.SEND_SANITYEVENTS, bb.cooker.CookerFeatures.BASEDATASTORE_TRACKING]
 
 logger = logging.getLogger("BitBake")
 interactive = sys.stdout.isatty()
@@ -144,7 +145,7 @@ class TerminalFilter(object):
                 pass
         if not cr:
             try:
-                cr = (env['LINES'], env['COLUMNS'])
+                cr = (os.environ['LINES'], os.environ['COLUMNS'])
             except:
                 cr = (25, 80)
         return cr
@@ -178,7 +179,7 @@ class TerminalFilter(object):
             new[3] = new[3] & ~termios.ECHO
             termios.tcsetattr(fd, termios.TCSADRAIN, new)
             curses.setupterm()
-            if curses.tigetnum("colors") > 2:
+            if curses.tigetnum("colors") > 2 and os.environ.get('NO_COLOR', '') == '':
                 for h in handlers:
                     try:
                         h.formatter.enable_color()
@@ -251,58 +252,68 @@ class TerminalFilter(object):
             return
         tasks = []
         for t in runningpids:
+            start_time = activetasks[t].get("starttime", None)
+            if start_time:
+                msg = "%s - %s (pid %s)" % (activetasks[t]["title"], self.elapsed(currenttime - start_time), activetasks[t]["pid"])
+            else:
+                msg = "%s (pid %s)" % (activetasks[t]["title"], activetasks[t]["pid"])
             progress = activetasks[t].get("progress", None)
             if progress is not None:
                 pbar = activetasks[t].get("progressbar", None)
                 rate = activetasks[t].get("rate", None)
-                start_time = activetasks[t].get("starttime", None)
                 if not pbar or pbar.bouncing != (progress < 0):
                     if progress < 0:
-                        pbar = BBProgress("0: %s (pid %s)" % (activetasks[t]["title"], activetasks[t]["pid"]), 100, widgets=[' ', progressbar.BouncingSlider(), ''], extrapos=3, resize_handler=self.sigwinch_handle)
+                        pbar = BBProgress("0: %s" % msg, 100, widgets=[' ', progressbar.BouncingSlider(), ''], extrapos=3, resize_handler=self.sigwinch_handle)
                         pbar.bouncing = True
                     else:
-                        pbar = BBProgress("0: %s (pid %s)" % (activetasks[t]["title"], activetasks[t]["pid"]), 100, widgets=[' ', progressbar.Percentage(), ' ', progressbar.Bar(), ''], extrapos=5, resize_handler=self.sigwinch_handle)
+                        pbar = BBProgress("0: %s" % msg, 100, widgets=[' ', progressbar.Percentage(), ' ', progressbar.Bar(), ''], extrapos=5, resize_handler=self.sigwinch_handle)
                         pbar.bouncing = False
                     activetasks[t]["progressbar"] = pbar
-                tasks.append((pbar, progress, rate, start_time))
+                tasks.append((pbar, msg, progress, rate, start_time))
             else:
-                start_time = activetasks[t].get("starttime", None)
-                if start_time:
-                    tasks.append("%s - %s (pid %s)" % (activetasks[t]["title"], self.elapsed(currenttime - start_time), activetasks[t]["pid"]))
-                else:
-                    tasks.append("%s (pid %s)" % (activetasks[t]["title"], activetasks[t]["pid"]))
+                tasks.append(msg)
 
         if self.main.shutdown:
-            content = "Waiting for %s running tasks to finish:" % len(activetasks)
+            content = pluralise("Waiting for %s running task to finish",
+                                "Waiting for %s running tasks to finish", len(activetasks))
+            if not self.quiet:
+                content += ':'
             print(content)
         else:
+            scene_tasks = "%s of %s" % (self.helper.setscene_current, self.helper.setscene_total)
+            cur_tasks = "%s of %s" % (self.helper.tasknumber_current, self.helper.tasknumber_total)
+
+            content = ''
+            if not self.quiet:
+                msg = "Setscene tasks: %s" % scene_tasks
+                content += msg + "\n"
+                print(msg)
+
             if self.quiet:
-                content = "Running tasks (%s of %s)" % (self.helper.tasknumber_current, self.helper.tasknumber_total)
+                msg = "Running tasks (%s, %s)" % (scene_tasks, cur_tasks)
             elif not len(activetasks):
-                content = "No currently running tasks (%s of %s)" % (self.helper.tasknumber_current, self.helper.tasknumber_total)
+                msg = "No currently running tasks (%s)" % cur_tasks
             else:
-                content = "Currently %2s running tasks (%s of %s)" % (len(activetasks), self.helper.tasknumber_current, self.helper.tasknumber_total)
+                msg = "Currently %2s running tasks (%s)" % (len(activetasks), cur_tasks)
             maxtask = self.helper.tasknumber_total
             if not self.main_progress or self.main_progress.maxval != maxtask:
                 widgets = [' ', progressbar.Percentage(), ' ', progressbar.Bar()]
                 self.main_progress = BBProgress("Running tasks", maxtask, widgets=widgets, resize_handler=self.sigwinch_handle)
                 self.main_progress.start(False)
-            self.main_progress.setmessage(content)
-            progress = self.helper.tasknumber_current - 1
-            if progress < 0:
-                progress = 0
-            content = self.main_progress.update(progress)
+            self.main_progress.setmessage(msg)
+            progress = max(0, self.helper.tasknumber_current - 1)
+            content += self.main_progress.update(progress)
             print('')
-        lines = 1 + int(len(content) / (self.columns + 1))
-        if self.quiet == 0:
-            for tasknum, task in enumerate(tasks[:(self.rows - 2)]):
+        lines = self.getlines(content)
+        if not self.quiet:
+            for tasknum, task in enumerate(tasks[:(self.rows - 1 - lines)]):
                 if isinstance(task, tuple):
-                    pbar, progress, rate, start_time = task
+                    pbar, msg, progress, rate, start_time = task
                     if not pbar.start_time:
                         pbar.start(False)
                         if start_time:
                             pbar.start_time = start_time
-                    pbar.setmessage('%s:%s' % (tasknum, pbar.msg.split(':', 1)[1]))
+                    pbar.setmessage('%s: %s' % (tasknum, msg))
                     pbar.setextra(rate)
                     if progress > -1:
                         content = pbar.update(progress)
@@ -312,10 +323,16 @@ class TerminalFilter(object):
                 else:
                     content = "%s: %s" % (tasknum, task)
                     print(content)
-                lines = lines + 1 + int(len(content) / (self.columns + 1))
+                lines = lines + self.getlines(content)
         self.footer_present = lines
         self.lastpids = runningpids[:]
         self.lastcount = self.helper.tasknumber_current
+
+    def getlines(self, content):
+        lines = 0
+        for line in content.split("\n"):
+            lines = lines + 1 + int(len(line) / (self.columns + 1))
+        return lines
 
     def finish(self):
         if self.stdinbackup:
@@ -402,6 +419,11 @@ def main(server, eventHandler, params, tf = TerminalFilter):
         loglevel, _ = bb.msg.constructLogOptions()
     except bb.BBHandledException:
         drain_events_errorhandling(eventHandler)
+        return 1
+    except Exception as e:
+        # bitbake-server comms failure
+        early_logger = bb.msg.logger_create('bitbake', sys.stdout)
+        early_logger.fatal("Attempting to set server environment: %s", e)
         return 1
 
     if params.options.quiet == 0:
@@ -541,12 +563,21 @@ def main(server, eventHandler, params, tf = TerminalFilter):
         except OSError:
            pass
 
+    # Add the logging domains specified by the user on the command line
+    for (domainarg, iterator) in groupby(params.debug_domains):
+        dlevel = len(tuple(iterator))
+        l = logconfig["loggers"].setdefault("BitBake.%s" % domainarg, {})
+        l["level"] = logging.DEBUG - dlevel + 1
+        l.setdefault("handlers", []).extend(["BitBake.verbconsole"])
+
     conf = bb.msg.setLoggingConfig(logconfig, logconfigfile)
 
     if sys.stdin.isatty() and sys.stdout.isatty():
         log_exec_tty = True
     else:
         log_exec_tty = False
+
+    should_print_hyperlinks = sys.stdout.isatty() and os.environ.get('NO_COLOR', '') == ''
 
     helper = uihelper.BBUIHelper()
 
@@ -561,7 +592,12 @@ def main(server, eventHandler, params, tf = TerminalFilter):
         return
 
     llevel, debug_domains = bb.msg.constructLogOptions()
-    server.runCommand(["setEventMask", server.getEventHandle(), llevel, debug_domains, _evt_list])
+    try:
+        server.runCommand(["setEventMask", server.getEventHandle(), llevel, debug_domains, _evt_list])
+    except (BrokenPipeError, EOFError) as e:
+        # bitbake-server comms failure
+        logger.fatal("Attempting to set event mask: %s", e)
+        return 1
 
     # The logging_tree module is *extremely* helpful in debugging logging
     # domains. Uncomment here to dump the logging tree when bitbake starts
@@ -570,7 +606,11 @@ def main(server, eventHandler, params, tf = TerminalFilter):
 
     universe = False
     if not params.observe_only:
-        params.updateFromServer(server)
+        try:
+            params.updateFromServer(server)
+        except Exception as e:
+            logger.fatal("Fetching command line: %s", e)
+            return 1
         cmdline = params.parseActions()
         if not cmdline:
             print("Nothing to do.  Use 'bitbake world' to build everything, or run 'bitbake --help' for usage information.")
@@ -581,7 +621,12 @@ def main(server, eventHandler, params, tf = TerminalFilter):
         if cmdline['action'][0] == "buildTargets" and "universe" in cmdline['action'][1]:
             universe = True
 
-        ret, error = server.runCommand(cmdline['action'])
+        try:
+            ret, error = server.runCommand(cmdline['action'])
+        except (BrokenPipeError, EOFError) as e:
+            # bitbake-server comms failure
+            logger.fatal("Command '{}' failed: %s".format(cmdline), e)
+            return 1
         if error:
             logger.error("Command '%s' failed: %s" % (cmdline, error))
             return 1
@@ -597,29 +642,42 @@ def main(server, eventHandler, params, tf = TerminalFilter):
     return_value = 0
     errors = 0
     warnings = 0
-    taskfailures = []
+    taskfailures = {}
 
     printintervaldelta = 10 * 60 # 10 minutes
     printinterval = printintervaldelta
-    lastprint = time.time()
+    pinginterval = 1 * 60 # 1 minute
+    lastevent = lastprint = time.time()
 
     termfilter = tf(main, helper, console_handlers, params.options.quiet)
     atexit.register(termfilter.finish)
 
-    while True:
+    # shutdown levels
+    # 0 - normal operation
+    # 1 - no new task execution, let current running tasks finish
+    # 2 - interrupting currently executing tasks
+    # 3 - we're done, exit
+    while main.shutdown < 3:
         try:
             if (lastprint + printinterval) <= time.time():
                 termfilter.keepAlive(printinterval)
                 printinterval += printintervaldelta
             event = eventHandler.waitEvent(0)
             if event is None:
-                if main.shutdown > 1:
-                    break
+                if (lastevent + pinginterval) <= time.time():
+                    ret, error = server.runCommand(["ping"])
+                    if error or not ret:
+                        termfilter.clearFooter()
+                        print("No reply after pinging server (%s, %s), exiting." % (str(error), str(ret)))
+                        return_value = 3
+                        main.shutdown = 3
+                    lastevent = time.time()
                 if not parseprogress:
                     termfilter.updateFooter()
                 event = eventHandler.waitEvent(0.25)
                 if event is None:
                     continue
+            lastevent = time.time()
             helper.eventHandler(event)
             if isinstance(event, bb.runqueue.runQueueExitWait):
                 if not main.shutdown:
@@ -642,7 +700,7 @@ def main(server, eventHandler, params, tf = TerminalFilter):
             if isinstance(event, logging.LogRecord):
                 lastprint = time.time()
                 printinterval = printintervaldelta
-                if event.levelno >= bb.msg.BBLogFormatter.ERROR:
+                if event.levelno >= bb.msg.BBLogFormatter.ERRORONCE:
                     errors = errors + 1
                     return_value = 1
                 elif event.levelno == bb.msg.BBLogFormatter.WARNING:
@@ -656,10 +714,10 @@ def main(server, eventHandler, params, tf = TerminalFilter):
                         continue
 
                     # Prefix task messages with recipe/task
-                    if event.taskpid in helper.pidmap and event.levelno != bb.msg.BBLogFormatter.PLAIN:
+                    if event.taskpid in helper.pidmap and event.levelno not in [bb.msg.BBLogFormatter.PLAIN, bb.msg.BBLogFormatter.WARNONCE, bb.msg.BBLogFormatter.ERRORONCE]:
                         taskinfo = helper.running_tasks[helper.pidmap[event.taskpid]]
                         event.msg = taskinfo['title'] + ': ' + event.msg
-                if hasattr(event, 'fn'):
+                if hasattr(event, 'fn') and event.levelno not in [bb.msg.BBLogFormatter.WARNONCE, bb.msg.BBLogFormatter.ERRORONCE]:
                     event.msg = event.fn + ': ' + event.msg
                 logging.getLogger(event.name).handle(event)
                 continue
@@ -670,6 +728,8 @@ def main(server, eventHandler, params, tf = TerminalFilter):
             if isinstance(event, bb.build.TaskFailed):
                 return_value = 1
                 print_event_log(event, includelogs, loglines, termfilter)
+                k = "{}:{}".format(event._fn, event._task)
+                taskfailures[k] = event.logfile
             if isinstance(event, bb.build.TaskBase):
                 logger.info(event._message)
                 continue
@@ -695,7 +755,7 @@ def main(server, eventHandler, params, tf = TerminalFilter):
                 if not parseprogress:
                     continue
                 parseprogress.finish()
-                pasreprogress = None
+                parseprogress = None
                 if params.options.quiet == 0:
                     print(("Parsing of %d .bb files complete (%d cached, %d parsed). %d targets, %d skipped, %d masked, %d errors."
                         % ( event.total, event.cached, event.parsed, event.virtuals, event.skipped, event.masked, event.errors)))
@@ -724,15 +784,15 @@ def main(server, eventHandler, params, tf = TerminalFilter):
                 if event.error:
                     errors = errors + 1
                     logger.error(str(event))
-                main.shutdown = 2
+                main.shutdown = 3
                 continue
             if isinstance(event, bb.command.CommandExit):
                 if not return_value:
                     return_value = event.exitcode
-                main.shutdown = 2
+                main.shutdown = 3
                 continue
             if isinstance(event, (bb.command.CommandCompleted, bb.cooker.CookerExit)):
-                main.shutdown = 2
+                main.shutdown = 3
                 continue
             if isinstance(event, bb.event.MultipleProviders):
                 logger.info(str(event))
@@ -748,7 +808,7 @@ def main(server, eventHandler, params, tf = TerminalFilter):
                 continue
 
             if isinstance(event, bb.runqueue.sceneQueueTaskStarted):
-                logger.info("Running setscene task %d of %d (%s)" % (event.stats.completed + event.stats.active + event.stats.failed + 1, event.stats.total, event.taskstring))
+                logger.info("Running setscene task %d of %d (%s)" % (event.stats.setscene_covered + event.stats.setscene_active + event.stats.setscene_notcovered + 1, event.stats.setscene_total, event.taskstring))
                 continue
 
             if isinstance(event, bb.runqueue.runQueueTaskStarted):
@@ -765,7 +825,7 @@ def main(server, eventHandler, params, tf = TerminalFilter):
 
             if isinstance(event, bb.runqueue.runQueueTaskFailed):
                 return_value = 1
-                taskfailures.append(event.taskstring)
+                taskfailures.setdefault(event.taskstring)
                 logger.error(str(event))
                 continue
 
@@ -817,15 +877,26 @@ def main(server, eventHandler, params, tf = TerminalFilter):
 
             logger.error("Unknown event: %s", event)
 
+        except (BrokenPipeError, EOFError) as e:
+            # bitbake-server comms failure, don't attempt further comms and exit
+            logger.fatal("Executing event: %s", e)
+            return_value = 1
+            errors = errors + 1
+            main.shutdown = 3
         except EnvironmentError as ioerror:
             termfilter.clearFooter()
             # ignore interrupted io
             if ioerror.args[0] == 4:
                 continue
             sys.stderr.write(str(ioerror))
-            if not params.observe_only:
-                _, error = server.runCommand(["stateForceShutdown"])
             main.shutdown = 2
+            if not params.observe_only:
+                try:
+                    _, error = server.runCommand(["stateForceShutdown"])
+                except (BrokenPipeError, EOFError) as e:
+                    # bitbake-server comms failure, don't attempt further comms and exit
+                    logger.fatal("Unable to force shutdown: %s", e)
+                    main.shutdown = 3
         except KeyboardInterrupt:
             termfilter.clearFooter()
             if params.observe_only:
@@ -834,9 +905,13 @@ def main(server, eventHandler, params, tf = TerminalFilter):
 
             def state_force_shutdown():
                 print("\nSecond Keyboard Interrupt, stopping...\n")
-                _, error = server.runCommand(["stateForceShutdown"])
-                if error:
-                    logger.error("Unable to cleanly stop: %s" % error)
+                try:
+                    _, error = server.runCommand(["stateForceShutdown"])
+                    if error:
+                        logger.error("Unable to cleanly stop: %s" % error)
+                except (BrokenPipeError, EOFError) as e:
+                    # bitbake-server comms failure
+                    logger.fatal("Unable to cleanly stop: %s", e)
 
             if not params.observe_only and main.shutdown == 1:
                 state_force_shutdown()
@@ -849,32 +924,49 @@ def main(server, eventHandler, params, tf = TerminalFilter):
                     _, error = server.runCommand(["stateShutdown"])
                     if error:
                         logger.error("Unable to cleanly shutdown: %s" % error)
+                except (BrokenPipeError, EOFError) as e:
+                    # bitbake-server comms failure
+                    logger.fatal("Unable to cleanly shutdown: %s", e)
                 except KeyboardInterrupt:
                     state_force_shutdown()
 
             main.shutdown = main.shutdown + 1
-            pass
         except Exception as e:
             import traceback
             sys.stderr.write(traceback.format_exc())
-            if not params.observe_only:
-                _, error = server.runCommand(["stateForceShutdown"])
             main.shutdown = 2
+            if not params.observe_only:
+                try:
+                    _, error = server.runCommand(["stateForceShutdown"])
+                except (BrokenPipeError, EOFError) as e:
+                    # bitbake-server comms failure, don't attempt further comms and exit
+                    logger.fatal("Unable to force shutdown: %s", e)
+                    main.shudown = 3
             return_value = 1
     try:
         termfilter.clearFooter()
         summary = ""
+        def format_hyperlink(url, link_text):
+            if should_print_hyperlinks:
+                start = f'\033]8;;{url}\033\\'
+                end = '\033]8;;\033\\'
+                return f'{start}{link_text}{end}'
+            return link_text
+
         if taskfailures:
             summary += pluralise("\nSummary: %s task failed:",
                                  "\nSummary: %s tasks failed:", len(taskfailures))
-            for failure in taskfailures:
+            for (failure, log_file) in taskfailures.items():
                 summary += "\n  %s" % failure
+                if log_file:
+                    hyperlink = format_hyperlink(f"file://{log_file}", log_file)
+                    summary += "\n    log: {}".format(hyperlink)
         if warnings:
-            summary += pluralise("\nSummary: There was %s WARNING message shown.",
-                                 "\nSummary: There were %s WARNING messages shown.", warnings)
+            summary += pluralise("\nSummary: There was %s WARNING message.",
+                                 "\nSummary: There were %s WARNING messages.", warnings)
         if return_value and errors:
-            summary += pluralise("\nSummary: There was %s ERROR message shown, returning a non-zero exit code.",
-                                 "\nSummary: There were %s ERROR messages shown, returning a non-zero exit code.", errors)
+            summary += pluralise("\nSummary: There was %s ERROR message, returning a non-zero exit code.",
+                                 "\nSummary: There were %s ERROR messages, returning a non-zero exit code.", errors)
         if summary and params.options.quiet == 0:
             print(summary)
 

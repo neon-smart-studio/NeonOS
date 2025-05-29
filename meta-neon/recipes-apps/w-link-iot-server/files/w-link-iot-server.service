@@ -1,0 +1,13 @@
+[Unit]
+Description=W-Link Web Control Service
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/wlink
+ExecStart=/usr/bin/node /opt/wlink/server.js
+Restart=always
+User=root
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

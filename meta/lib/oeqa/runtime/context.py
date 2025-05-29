@@ -10,7 +10,6 @@ import sys
 from oeqa.core.context import OETestContext, OETestContextExecutor
 from oeqa.core.target.ssh import OESSHTarget
 from oeqa.core.target.qemu import OEQemuTarget
-from oeqa.utils.dump import HostDumper
 
 from oeqa.runtime.loader import OERuntimeTestLoader
 
@@ -20,12 +19,11 @@ class OERuntimeTestContext(OETestContext):
                         os.path.dirname(os.path.abspath(__file__)), "files")
 
     def __init__(self, td, logger, target,
-                 host_dumper, image_packages, extract_dir):
+                 image_packages, extract_dir):
         super(OERuntimeTestContext, self).__init__(td, logger)
 
         self.target = target
         self.image_packages = image_packages
-        self.host_dumper = host_dumper
         self.extract_dir = extract_dir
         self._set_target_cmds()
 
@@ -153,7 +151,11 @@ class OERuntimeTestContextExecutor(OETestContextExecutor):
                 else:
                     raise RuntimeError("Duplicate controller module found for %s. Layers should create unique controller module names" % module)
 
-        for p in sys.path:
+        # sys.path can contain duplicate paths, but because of the login in
+        # add_controller_list this doesn't work and causes testimage to abort.
+        # Remove duplicates using an intermediate dictionary to ensure this
+        # doesn't happen.
+        for p in list(dict.fromkeys(sys.path)):
             controllerpath = os.path.join(p, 'oeqa', 'controllers')
             if os.path.exists(controllerpath):
                 add_controller_list(controllerpath)
@@ -195,10 +197,6 @@ class OERuntimeTestContextExecutor(OETestContextExecutor):
 
         return image_packages
 
-    @staticmethod
-    def getHostDumper(cmds, directory):
-        return HostDumper(cmds, directory)
-
     def _process_args(self, logger, args):
         if not args.packages_manifest:
             raise TypeError('Manifest file not provided')
@@ -211,9 +209,6 @@ class OERuntimeTestContextExecutor(OETestContextExecutor):
         self.tc_kwargs['init']['target'] = \
                 OERuntimeTestContextExecutor.getTarget(args.target_type,
                         None, args.target_ip, args.server_ip, **target_kwargs)
-        self.tc_kwargs['init']['host_dumper'] = \
-                OERuntimeTestContextExecutor.getHostDumper(None,
-                        args.host_dumper_dir)
         self.tc_kwargs['init']['image_packages'] = \
                 OERuntimeTestContextExecutor.readPackagesManifest(
                         args.packages_manifest)

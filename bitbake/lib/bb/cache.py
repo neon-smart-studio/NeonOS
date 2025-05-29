@@ -20,15 +20,21 @@ import os
 import logging
 import pickle
 from collections import defaultdict
+from collections.abc import Mapping
 import bb.utils
+from bb import PrefixLoggerAdapter
 import re
+import shutil
 
 logger = logging.getLogger("BitBake.Cache")
 
-__cache_version__ = "152"
+__cache_version__ = "155"
 
-def getCacheFile(path, filename, data_hash):
-    return os.path.join(path, filename + "." + data_hash)
+def getCacheFile(path, filename, mc, data_hash):
+    mcspec = ''
+    if mc:
+        mcspec = ".%s" % mc
+    return os.path.join(path, filename + mcspec + "." + data_hash)
 
 # RecipeInfoCommon defines common data retrieving methods
 # from meta data for caches. CoreRecipeInfo as well as other
@@ -49,12 +55,12 @@ class RecipeInfoCommon(object):
 
     @classmethod
     def pkgvar(cls, var, packages, metadata):
-        return dict((pkg, cls.depvar("%s_%s" % (var, pkg), metadata))
+        return dict((pkg, cls.depvar("%s:%s" % (var, pkg), metadata))
                     for pkg in packages)
 
     @classmethod
     def taskvar(cls, var, tasks, metadata):
-        return dict((task, cls.getvar("%s_task-%s" % (var, task), metadata))
+        return dict((task, cls.getvar("%s:task-%s" % (var, task), metadata))
                     for task in tasks)
 
     @classmethod
@@ -90,6 +96,7 @@ class CoreRecipeInfo(RecipeInfoCommon):
         if not self.packages:
             self.packages.append(self.pn)
         self.packages_dynamic = self.listvar('PACKAGES_DYNAMIC', metadata)
+        self.rprovides_pkg = self.pkgvar('RPROVIDES', self.packages, metadata)
 
         self.skipreason = self.getvar('__SKIPPED', metadata)
         if self.skipreason:
@@ -98,7 +105,7 @@ class CoreRecipeInfo(RecipeInfoCommon):
 
         self.tasks = metadata.getVar('__BBTASKS', False)
 
-        self.basetaskhashes = self.taskvar('BB_BASEHASH', self.tasks, metadata)
+        self.basetaskhashes = metadata.getVar('__siggen_basehashes', False) or {}
         self.hashfilename = self.getvar('BB_HASHFILENAME', metadata)
 
         self.task_deps = metadata.getVar('_task_deps', False) or {'tasks': [], 'parents': {}}
@@ -116,12 +123,12 @@ class CoreRecipeInfo(RecipeInfoCommon):
         self.depends          = self.depvar('DEPENDS', metadata)
         self.rdepends         = self.depvar('RDEPENDS', metadata)
         self.rrecommends      = self.depvar('RRECOMMENDS', metadata)
-        self.rprovides_pkg    = self.pkgvar('RPROVIDES', self.packages, metadata)
         self.rdepends_pkg     = self.pkgvar('RDEPENDS', self.packages, metadata)
         self.rrecommends_pkg  = self.pkgvar('RRECOMMENDS', self.packages, metadata)
         self.inherits         = self.getvar('__inherit_cache', metadata, expand=False)
         self.fakerootenv      = self.getvar('FAKEROOTENV', metadata)
         self.fakerootdirs     = self.getvar('FAKEROOTDIRS', metadata)
+        self.fakerootlogs     = self.getvar('FAKEROOTLOGS', metadata)
         self.fakerootnoenv    = self.getvar('FAKEROOTNOENV', metadata)
         self.extradepsfunc    = self.getvar('calculate_extra_depends', metadata)
 
@@ -159,6 +166,7 @@ class CoreRecipeInfo(RecipeInfoCommon):
         cachedata.fakerootenv = {}
         cachedata.fakerootnoenv = {}
         cachedata.fakerootdirs = {}
+        cachedata.fakerootlogs = {}
         cachedata.extradepsfunc = {}
 
     def add_cacheData(self, cachedata, fn):
@@ -208,10 +216,10 @@ class CoreRecipeInfo(RecipeInfoCommon):
 
         # Collect files we may need for possible world-dep
         # calculations
-        if not self.not_world:
+        if not bb.utils.to_boolean(self.not_world):
             cachedata.possible_world.append(fn)
         #else:
-        #    logger.debug(2, "EXCLUDE FROM WORLD: %s", fn)
+        #    logger.debug2("EXCLUDE FROM WORLD: %s", fn)
 
         # create a collection of all targets for sanity checking
         # tasks, such as upstream versions, license, and tools for
@@ -227,17 +235,116 @@ class CoreRecipeInfo(RecipeInfoCommon):
         cachedata.fakerootenv[fn] = self.fakerootenv
         cachedata.fakerootnoenv[fn] = self.fakerootnoenv
         cachedata.fakerootdirs[fn] = self.fakerootdirs
+        cachedata.fakerootlogs[fn] = self.fakerootlogs
         cachedata.extradepsfunc[fn] = self.extradepsfunc
+
+
+class SiggenRecipeInfo(RecipeInfoCommon):
+    __slots__ = ()
+
+    classname = "SiggenRecipeInfo"
+    cachefile = "bb_cache_" + classname +".dat"
+    # we don't want to show this information in graph files so don't set cachefields
+    #cachefields = []
+
+    def __init__(self, filename, metadata):
+        self.siggen_gendeps = metadata.getVar("__siggen_gendeps", False)
+        self.siggen_varvals = metadata.getVar("__siggen_varvals", False)
+        self.siggen_taskdeps = metadata.getVar("__siggen_taskdeps", False)
+
+    @classmethod
+    def init_cacheData(cls, cachedata):
+        cachedata.siggen_taskdeps = {}
+        cachedata.siggen_gendeps = {}
+        cachedata.siggen_varvals = {}
+
+    def add_cacheData(self, cachedata, fn):
+        cachedata.siggen_gendeps[fn] = self.siggen_gendeps
+        cachedata.siggen_varvals[fn] = self.siggen_varvals
+        cachedata.siggen_taskdeps[fn] = self.siggen_taskdeps
+
+    # The siggen variable data is large and impacts:
+    #  - bitbake's overall memory usage
+    #  - the amount of data sent over IPC between parsing processes and the server
+    #  - the size of the cache files on disk
+    #  - the size of "sigdata" hash information files on disk
+    # The data consists of strings (some large) or frozenset lists of variables
+    # As such, we a) deplicate the data here and b) pass references to the object at second
+    # access (e.g. over IPC or saving into pickle).
+
+    store = {}
+    save_map = {}
+    save_count = 1
+    restore_map = {}
+    restore_count = {}
+
+    @classmethod
+    def reset(cls):
+        # Needs to be called before starting new streamed data in a given process 
+        # (e.g. writing out the cache again)
+        cls.save_map = {}
+        cls.save_count = 1
+        cls.restore_map = {}
+
+    @classmethod
+    def _save(cls, deps):
+        ret = []
+        if not deps:
+            return deps
+        for dep in deps:
+            fs = deps[dep]
+            if fs is None:
+                ret.append((dep, None, None))
+            elif fs in cls.save_map:
+                ret.append((dep, None, cls.save_map[fs]))
+            else:
+                cls.save_map[fs] = cls.save_count
+                ret.append((dep, fs, cls.save_count))
+                cls.save_count = cls.save_count + 1
+        return ret
+
+    @classmethod
+    def _restore(cls, deps, pid):
+        ret = {}
+        if not deps:
+            return deps
+        if pid not in cls.restore_map:
+            cls.restore_map[pid] = {}
+        map = cls.restore_map[pid]
+        for dep, fs, mapnum in deps:
+            if fs is None and mapnum is None:
+                ret[dep] = None
+            elif fs is None:
+                ret[dep] = map[mapnum]
+            else:
+                try:
+                    fs = cls.store[fs]
+                except KeyError:
+                    cls.store[fs] = fs
+                map[mapnum] = fs
+                ret[dep] = fs
+        return ret
+
+    def __getstate__(self):
+        ret = {}
+        for key in ["siggen_gendeps", "siggen_taskdeps", "siggen_varvals"]:
+            ret[key] = self._save(self.__dict__[key])
+        ret['pid'] = os.getpid()
+        return ret
+
+    def __setstate__(self, state):
+        pid = state['pid']
+        for key in ["siggen_gendeps", "siggen_taskdeps", "siggen_varvals"]:
+            setattr(self, key, self._restore(state[key], pid))
+
 
 def virtualfn2realfn(virtualfn):
     """
     Convert a virtual file name to a real one + the associated subclass keyword
     """
     mc = ""
-    if virtualfn.startswith('mc:'):
-        elems = virtualfn.split(':')
-        mc = elems[1]
-        virtualfn = ":".join(elems[2:])
+    if virtualfn.startswith('mc:') and virtualfn.count(':') >= 2:
+        (_, mc, virtualfn) = virtualfn.split(':', 2)
 
     fn = virtualfn
     cls = ""
@@ -260,110 +367,37 @@ def realfn2virtual(realfn, cls, mc):
 
 def variant2virtual(realfn, variant):
     """
-    Convert a real filename + the associated subclass keyword to a virtual filename
+    Convert a real filename + a variant to a virtual filename
     """
     if variant == "":
         return realfn
-    if variant.startswith("mc:"):
+    if variant.startswith("mc:") and variant.count(':') >= 2:
         elems = variant.split(":")
         if elems[2]:
             return "mc:" + elems[1] + ":virtual:" + ":".join(elems[2:]) + ":" + realfn
         return "mc:" + elems[1] + ":" + realfn
     return "virtual:" + variant + ":" + realfn
 
-def parse_recipe(bb_data, bbfile, appends, mc=''):
-    """
-    Parse a recipe
-    """
-
-    chdir_back = False
-
-    bb_data.setVar("__BBMULTICONFIG", mc)
-
-    # expand tmpdir to include this topdir
-    bb_data.setVar('TMPDIR', bb_data.getVar('TMPDIR') or "")
-    bbfile_loc = os.path.abspath(os.path.dirname(bbfile))
-    oldpath = os.path.abspath(os.getcwd())
-    bb.parse.cached_mtime_noerror(bbfile_loc)
-
-    # The ConfHandler first looks if there is a TOPDIR and if not
-    # then it would call getcwd().
-    # Previously, we chdir()ed to bbfile_loc, called the handler
-    # and finally chdir()ed back, a couple of thousand times. We now
-    # just fill in TOPDIR to point to bbfile_loc if there is no TOPDIR yet.
-    if not bb_data.getVar('TOPDIR', False):
-        chdir_back = True
-        bb_data.setVar('TOPDIR', bbfile_loc)
-    try:
-        if appends:
-            bb_data.setVar('__BBAPPEND', " ".join(appends))
-        bb_data = bb.parse.handle(bbfile, bb_data)
-        if chdir_back:
-            os.chdir(oldpath)
-        return bb_data
-    except:
-        if chdir_back:
-            os.chdir(oldpath)
-        raise
-
-
-
-class NoCache(object):
-
-    def __init__(self, databuilder):
-        self.databuilder = databuilder
-        self.data = databuilder.data
-
-    def loadDataFull(self, virtualfn, appends):
-        """
-        Return a complete set of data for fn.
-        To do this, we need to parse the file.
-        """
-        logger.debug(1, "Parsing %s (full)" % virtualfn)
-        (fn, virtual, mc) = virtualfn2realfn(virtualfn)
-        bb_data = self.load_bbfile(virtualfn, appends, virtonly=True)
-        return bb_data[virtual]
-
-    def load_bbfile(self, bbfile, appends, virtonly = False):
-        """
-        Load and parse one .bb build file
-        Return the data and whether parsing resulted in the file being skipped
-        """
-
-        if virtonly:
-            (bbfile, virtual, mc) = virtualfn2realfn(bbfile)
-            bb_data = self.databuilder.mcdata[mc].createCopy()
-            bb_data.setVar("__ONLYFINALISE", virtual or "default")
-            datastores = parse_recipe(bb_data, bbfile, appends, mc)
-            return datastores
-
-        bb_data = self.data.createCopy()
-        datastores = parse_recipe(bb_data, bbfile, appends)
-
-        for mc in self.databuilder.mcdata:
-            if not mc:
-                continue
-            bb_data = self.databuilder.mcdata[mc].createCopy()
-            newstores = parse_recipe(bb_data, bbfile, appends, mc)
-            for ns in newstores:
-                datastores["mc:%s:%s" % (mc, ns)] = newstores[ns]
-
-        return datastores
-
-class Cache(NoCache):
+#
+# Cooker calls cacheValid on its recipe list, then either calls loadCached
+# from it's main thread or parse from separate processes to generate an up to
+# date cache
+#
+class Cache(object):
     """
     BitBake Cache implementation
     """
-
-    def __init__(self, databuilder, data_hash, caches_array):
-        super().__init__(databuilder)
-        data = databuilder.data
+    def __init__(self, databuilder, mc, data_hash, caches_array):
+        self.databuilder = databuilder
+        self.data = databuilder.data
 
         # Pass caches_array information into Cache Constructor
         # It will be used later for deciding whether we
         # need extra cache file dump/load support
+        self.mc = mc
+        self.logger = PrefixLoggerAdapter("Cache: %s: " % (mc if mc else "default"), logger)
         self.caches_array = caches_array
-        self.cachedir = data.getVar("CACHE")
+        self.cachedir = self.data.getVar("CACHE")
         self.clean = set()
         self.checked = set()
         self.depends_cache = {}
@@ -373,32 +407,40 @@ class Cache(NoCache):
         self.filelist_regex = re.compile(r'(?:(?<=:True)|(?<=:False))\s+')
 
         if self.cachedir in [None, '']:
-            self.has_cache = False
-            logger.info("Not using a cache. "
-                        "Set CACHE = <directory> to enable.")
-            return
+            bb.fatal("Please ensure CACHE is set to the cache directory for BitBake to use")
 
-        self.has_cache = True
-        self.cachefile = getCacheFile(self.cachedir, "bb_cache.dat", self.data_hash)
+    def getCacheFile(self, cachefile):
+        return getCacheFile(self.cachedir, cachefile, self.mc, self.data_hash)
 
-        logger.debug(1, "Cache dir: %s", self.cachedir)
+    def prepare_cache(self, progress):
+        loaded = 0
+
+        self.cachefile = self.getCacheFile("bb_cache.dat")
+
+        self.logger.debug("Cache dir: %s", self.cachedir)
         bb.utils.mkdirhier(self.cachedir)
 
         cache_ok = True
         if self.caches_array:
             for cache_class in self.caches_array:
-                cachefile = getCacheFile(self.cachedir, cache_class.cachefile, self.data_hash)
-                cache_ok = cache_ok and os.path.exists(cachefile)
+                cachefile = self.getCacheFile(cache_class.cachefile)
+                cache_exists = os.path.exists(cachefile)
+                self.logger.debug2("Checking if %s exists: %r", cachefile, cache_exists)
+                cache_ok = cache_ok and cache_exists
                 cache_class.init_cacheData(self)
         if cache_ok:
-            self.load_cachefile()
+            loaded = self.load_cachefile(progress)
         elif os.path.isfile(self.cachefile):
-            logger.info("Out of date cache found, rebuilding...")
+            self.logger.info("Out of date cache found, rebuilding...")
         else:
-            logger.debug(1, "Cache file %s not found, building..." % self.cachefile)
+            self.logger.debug("Cache file %s not found, building..." % self.cachefile)
 
         # We don't use the symlink, its just for debugging convinience
-        symlink = os.path.join(self.cachedir, "bb_cache.dat")
+        if self.mc:
+            symlink = os.path.join(self.cachedir, "bb_cache.dat.%s" % self.mc)
+        else:
+            symlink = os.path.join(self.cachedir, "bb_cache.dat")
+
         if os.path.exists(symlink):
             bb.utils.remove(symlink)
         try:
@@ -406,22 +448,26 @@ class Cache(NoCache):
         except OSError:
             pass
 
-    def load_cachefile(self):
+        return loaded
+
+    def cachesize(self):
         cachesize = 0
+        for cache_class in self.caches_array:
+            cachefile = self.getCacheFile(cache_class.cachefile)
+            try:
+                with open(cachefile, "rb") as cachefile:
+                    cachesize += os.fstat(cachefile.fileno()).st_size
+            except FileNotFoundError:
+                pass
+
+        return cachesize
+
+    def load_cachefile(self, progress):
         previous_progress = 0
-        previous_percent = 0
-
-        # Calculate the correct cachesize of all those cache files
-        for cache_class in self.caches_array:
-            cachefile = getCacheFile(self.cachedir, cache_class.cachefile, self.data_hash)
-            with open(cachefile, "rb") as cachefile:
-                cachesize += os.fstat(cachefile.fileno()).st_size
-
-        bb.event.fire(bb.event.CacheLoadStarted(cachesize), self.data)
 
         for cache_class in self.caches_array:
-            cachefile = getCacheFile(self.cachedir, cache_class.cachefile, self.data_hash)
-            logger.debug(1, 'Loading cache file: %s' % cachefile)
+            cachefile = self.getCacheFile(cache_class.cachefile)
+            self.logger.debug('Loading cache file: %s' % cachefile)
             with open(cachefile, "rb") as cachefile:
                 pickled = pickle.Unpickler(cachefile)
                 # Check cache version information
@@ -429,15 +475,15 @@ class Cache(NoCache):
                     cache_ver = pickled.load()
                     bitbake_ver = pickled.load()
                 except Exception:
-                    logger.info('Invalid cache, rebuilding...')
-                    return
+                    self.logger.info('Invalid cache, rebuilding...')
+                    return 0
 
                 if cache_ver != __cache_version__:
-                    logger.info('Cache version mismatch, rebuilding...')
-                    return
+                    self.logger.info('Cache version mismatch, rebuilding...')
+                    return 0
                 elif bitbake_ver != bb.__version__:
-                    logger.info('Bitbake version mismatch, rebuilding...')
-                    return
+                    self.logger.info('Bitbake version mismatch, rebuilding...')
+                    return 0
 
                 # Load the rest of the cache file
                 current_progress = 0
@@ -460,29 +506,17 @@ class Cache(NoCache):
                         self.depends_cache[key] = [value]
                     # only fire events on even percentage boundaries
                     current_progress = cachefile.tell() + previous_progress
-                    if current_progress > cachesize:
-                        # we might have calculated incorrect total size because a file
-                        # might've been written out just after we checked its size
-                        cachesize = current_progress
-                    current_percent = 100 * current_progress / cachesize
-                    if current_percent > previous_percent:
-                        previous_percent = current_percent
-                        bb.event.fire(bb.event.CacheLoadProgress(current_progress, cachesize),
-                                      self.data)
+                    progress(cachefile.tell() + previous_progress)
 
                 previous_progress += current_progress
 
-        # Note: depends cache number is corresponding to the parsing file numbers.
-        # The same file has several caches, still regarded as one item in the cache
-        bb.event.fire(bb.event.CacheLoadCompleted(cachesize,
-                                                  len(self.depends_cache)),
-                      self.data)
+        return len(self.depends_cache)
 
-    def parse(self, filename, appends):
+    def parse(self, filename, appends, layername):
         """Parse the specified filename, returning the recipe information"""
-        logger.debug(1, "Parsing %s", filename)
+        self.logger.debug("Parsing %s", filename)
         infos = []
-        datastores = self.load_bbfile(filename, appends)
+        datastores = self.databuilder.parseRecipeVariants(filename, appends, mc=self.mc, layername=layername)
         depends = []
         variants = []
         # Process the "real" fn last so we can store variants list
@@ -504,43 +538,19 @@ class Cache(NoCache):
 
         return infos
 
-    def load(self, filename, appends):
+    def loadCached(self, filename, appends):
         """Obtain the recipe information for the specified filename,
-        using cached values if available, otherwise parsing.
+        using cached values.
+        """
 
-        Note that if it does parse to obtain the info, it will not
-        automatically add the information to the cache or to your
-        CacheData.  Use the add or add_info method to do so after
-        running this, or use loadData instead."""
-        cached = self.cacheValid(filename, appends)
-        if cached:
-            infos = []
-            # info_array item is a list of [CoreRecipeInfo, XXXRecipeInfo]
-            info_array = self.depends_cache[filename]
-            for variant in info_array[0].variants:
-                virtualfn = variant2virtual(filename, variant)
-                infos.append((virtualfn, self.depends_cache[virtualfn]))
-        else:
-            return self.parse(filename, appends, configdata, self.caches_array)
+        infos = []
+        # info_array item is a list of [CoreRecipeInfo, XXXRecipeInfo]
+        info_array = self.depends_cache[filename]
+        for variant in info_array[0].variants:
+            virtualfn = variant2virtual(filename, variant)
+            infos.append((virtualfn, self.depends_cache[virtualfn]))
 
-        return cached, infos
-
-    def loadData(self, fn, appends, cacheData):
-        """Load the recipe info for the specified filename,
-        parsing and adding to the cache if necessary, and adding
-        the recipe information to the supplied CacheData instance."""
-        skipped, virtuals = 0, 0
-
-        cached, infos = self.load(fn, appends)
-        for virtualfn, info_array in infos:
-            if info_array[0].skipped:
-                logger.debug(1, "Skipping %s: %s", virtualfn, info_array[0].skipreason)
-                skipped += 1
-            else:
-                self.add_info(virtualfn, info_array, cacheData, not cached)
-                virtuals += 1
-
-        return cached, skipped, virtuals
+        return infos
 
     def cacheValid(self, fn, appends):
         """
@@ -549,10 +559,6 @@ class Cache(NoCache):
         """
         if fn not in self.checked:
             self.cacheValidUpdate(fn, appends)
-
-        # Is cache enabled?
-        if not self.has_cache:
-            return False
         if fn in self.clean:
             return True
         return False
@@ -562,29 +568,25 @@ class Cache(NoCache):
         Is the cache valid for fn?
         Make thorough (slower) checks including timestamps.
         """
-        # Is cache enabled?
-        if not self.has_cache:
-            return False
-
         self.checked.add(fn)
 
         # File isn't in depends_cache
         if not fn in self.depends_cache:
-            logger.debug(2, "Cache: %s is not cached", fn)
+            self.logger.debug2("%s is not cached", fn)
             return False
 
         mtime = bb.parse.cached_mtime_noerror(fn)
 
         # Check file still exists
         if mtime == 0:
-            logger.debug(2, "Cache: %s no longer exists", fn)
+            self.logger.debug2("%s no longer exists", fn)
             self.remove(fn)
             return False
 
         info_array = self.depends_cache[fn]
         # Check the file's timestamp
         if mtime != info_array[0].timestamp:
-            logger.debug(2, "Cache: %s changed", fn)
+            self.logger.debug2("%s changed", fn)
             self.remove(fn)
             return False
 
@@ -595,14 +597,14 @@ class Cache(NoCache):
                 fmtime = bb.parse.cached_mtime_noerror(f)
                 # Check if file still exists
                 if old_mtime != 0 and fmtime == 0:
-                    logger.debug(2, "Cache: %s's dependency %s was removed",
-                                    fn, f)
+                    self.logger.debug2("%s's dependency %s was removed",
+                                         fn, f)
                     self.remove(fn)
                     return False
 
                 if (fmtime != old_mtime):
-                    logger.debug(2, "Cache: %s's dependency %s changed",
-                                    fn, f)
+                    self.logger.debug2("%s's dependency %s changed",
+                                         fn, f)
                     self.remove(fn)
                     return False
 
@@ -614,18 +616,18 @@ class Cache(NoCache):
                 # Have to be careful about spaces and colons in filenames
                 flist = self.filelist_regex.split(fl)
                 for f in flist:
-                    if not f or "*" in f:
+                    if not f:
                         continue
-                    f, exist = f.split(":")
+                    f, exist = f.rsplit(":", 1)
                     if (exist == "True" and not os.path.exists(f)) or (exist == "False" and os.path.exists(f)):
-                        logger.debug(2, "Cache: %s's file checksum list file %s changed",
-                                        fn, f)
+                        self.logger.debug2("%s's file checksum list file %s changed",
+                                             fn, f)
                         self.remove(fn)
                         return False
 
-        if appends != info_array[0].appends:
-            logger.debug(2, "Cache: appends for %s changed", fn)
-            logger.debug(2, "%s to %s" % (str(appends), str(info_array[0].appends)))
+        if tuple(appends) != tuple(info_array[0].appends):
+            self.logger.debug2("appends for %s changed", fn)
+            self.logger.debug2("%s to %s" % (str(appends), str(info_array[0].appends)))
             self.remove(fn)
             return False
 
@@ -634,10 +636,10 @@ class Cache(NoCache):
             virtualfn = variant2virtual(fn, cls)
             self.clean.add(virtualfn)
             if virtualfn not in self.depends_cache:
-                logger.debug(2, "Cache: %s is not cached", virtualfn)
+                self.logger.debug2("%s is not cached", virtualfn)
                 invalid = True
             elif len(self.depends_cache[virtualfn]) != len(self.caches_array):
-                logger.debug(2, "Cache: Extra caches missing for %s?" % virtualfn)
+                self.logger.debug2("Extra caches missing for %s?" % virtualfn)
                 invalid = True
 
         # If any one of the variants is not present, mark as invalid for all
@@ -645,10 +647,10 @@ class Cache(NoCache):
             for cls in info_array[0].variants:
                 virtualfn = variant2virtual(fn, cls)
                 if virtualfn in self.clean:
-                    logger.debug(2, "Cache: Removing %s from cache", virtualfn)
+                    self.logger.debug2("Removing %s from cache", virtualfn)
                     self.clean.remove(virtualfn)
             if fn in self.clean:
-                logger.debug(2, "Cache: Marking %s as not clean", fn)
+                self.logger.debug2("Marking %s as not clean", fn)
                 self.clean.remove(fn)
             return False
 
@@ -661,10 +663,10 @@ class Cache(NoCache):
         Called from the parser in error cases
         """
         if fn in self.depends_cache:
-            logger.debug(1, "Removing %s from cache", fn)
+            self.logger.debug("Removing %s from cache", fn)
             del self.depends_cache[fn]
         if fn in self.clean:
-            logger.debug(1, "Marking %s as unclean", fn)
+            self.logger.debug("Marking %s as unclean", fn)
             self.clean.remove(fn)
 
     def sync(self):
@@ -672,17 +674,14 @@ class Cache(NoCache):
         Save the cache
         Called from the parser when complete (or exiting)
         """
-
-        if not self.has_cache:
-            return
-
         if self.cacheclean:
-            logger.debug(2, "Cache is clean, not saving.")
+            self.logger.debug2("Cache is clean, not saving.")
             return
 
         for cache_class in self.caches_array:
             cache_class_name = cache_class.__name__
-            cachefile = getCacheFile(self.cachedir, cache_class.cachefile, self.data_hash)
+            cachefile = self.getCacheFile(cache_class.cachefile)
+            self.logger.debug2("Writing %s", cachefile)
             with open(cachefile, "wb") as f:
                 p = pickle.Pickler(f, pickle.HIGHEST_PROTOCOL)
                 p.dump(__cache_version__)
@@ -695,38 +694,90 @@ class Cache(NoCache):
                             p.dump(info)
 
         del self.depends_cache
+        SiggenRecipeInfo.reset()
 
     @staticmethod
     def mtime(cachefile):
         return bb.parse.cached_mtime_noerror(cachefile)
 
     def add_info(self, filename, info_array, cacheData, parsed=None, watcher=None):
+        if self.mc is not None:
+            (fn, cls, mc) = virtualfn2realfn(filename)
+            if mc:
+                self.logger.error("Unexpected multiconfig %s", filename)
+                return
+
+            vfn = realfn2virtual(fn, cls, self.mc)
+        else:
+            vfn = filename
+
         if isinstance(info_array[0], CoreRecipeInfo) and (not info_array[0].skipped):
-            cacheData.add_from_recipeinfo(filename, info_array)
+            cacheData.add_from_recipeinfo(vfn, info_array)
 
             if watcher:
                 watcher(info_array[0].file_depends)
-
-        if not self.has_cache:
-            return
 
         if (info_array[0].skipped or 'SRCREVINACTION' not in info_array[0].pv) and not info_array[0].nocache:
             if parsed:
                 self.cacheclean = False
             self.depends_cache[filename] = info_array
 
-    def add(self, file_name, data, cacheData, parsed=None):
-        """
-        Save data we need into the cache
-        """
+class MulticonfigCache(Mapping):
+    def __init__(self, databuilder, data_hash, caches_array):
+        def progress(p):
+            nonlocal current_progress
+            nonlocal previous_progress
+            nonlocal previous_percent
+            nonlocal cachesize
 
-        realfn = virtualfn2realfn(file_name)[0]
+            current_progress = previous_progress + p
 
-        info_array = []
-        for cache_class in self.caches_array:
-            info_array.append(cache_class(realfn, data))
-        self.add_info(file_name, info_array, cacheData, parsed)
+            if current_progress > cachesize:
+                # we might have calculated incorrect total size because a file
+                # might've been written out just after we checked its size
+                cachesize = current_progress
+            current_percent = 100 * current_progress / cachesize
+            if current_percent > previous_percent:
+                previous_percent = current_percent
+                bb.event.fire(bb.event.CacheLoadProgress(current_progress, cachesize),
+                                databuilder.data)
 
+
+        cachesize = 0
+        current_progress = 0
+        previous_progress = 0
+        previous_percent = 0
+        self.__caches = {}
+
+        for mc, mcdata in databuilder.mcdata.items():
+            self.__caches[mc] = Cache(databuilder, mc, data_hash, caches_array)
+
+            cachesize += self.__caches[mc].cachesize()
+
+        bb.event.fire(bb.event.CacheLoadStarted(cachesize), databuilder.data)
+        loaded = 0
+
+        for c in self.__caches.values():
+            SiggenRecipeInfo.reset()
+            loaded += c.prepare_cache(progress)
+            previous_progress = current_progress
+
+        # Note: depends cache number is corresponding to the parsing file numbers.
+        # The same file has several caches, still regarded as one item in the cache
+        bb.event.fire(bb.event.CacheLoadCompleted(cachesize, loaded), databuilder.data)
+
+    def __len__(self):
+        return len(self.__caches)
+
+    def __getitem__(self, key):
+        return self.__caches[key]
+
+    def __contains__(self, key):
+        return key in self.__caches
+
+    def __iter__(self):
+        for k in self.__caches:
+            yield k
 
 def init(cooker):
     """
@@ -785,15 +836,14 @@ class MultiProcessCache(object):
         self.cachedata = self.create_cachedata()
         self.cachedata_extras = self.create_cachedata()
 
-    def init_cache(self, d, cache_file_name=None):
-        cachedir = (d.getVar("PERSISTENT_DIR") or
-                    d.getVar("CACHE"))
-        if cachedir in [None, '']:
+    def init_cache(self, cachedir, cache_file_name=None):
+        if not cachedir:
             return
+
         bb.utils.mkdirhier(cachedir)
         self.cachefile = os.path.join(cachedir,
                                       cache_file_name or self.__class__.cache_file_name)
-        logger.debug(1, "Using cache in '%s'", self.cachefile)
+        logger.debug("Using cache in '%s'", self.cachefile)
 
         glf = bb.utils.lockfile(self.cachefile + ".lock")
 
@@ -818,6 +868,10 @@ class MultiProcessCache(object):
 
     def save_extras(self):
         if not self.cachefile:
+            return
+
+        have_data = any(self.cachedata_extras)
+        if not have_data:
             return
 
         glf = bb.utils.lockfile(self.cachefile + ".lock", shared=True)
@@ -854,6 +908,8 @@ class MultiProcessCache(object):
 
         data = self.cachedata
 
+        have_data = False
+
         for f in [y for y in os.listdir(os.path.dirname(self.cachefile)) if y.startswith(os.path.basename(self.cachefile) + '-')]:
             f = os.path.join(os.path.dirname(self.cachefile), f)
             try:
@@ -868,12 +924,14 @@ class MultiProcessCache(object):
                 os.unlink(f)
                 continue
 
+            have_data = True
             self.merge_data(extradata, data)
             os.unlink(f)
 
-        with open(self.cachefile, "wb") as f:
-            p = pickle.Pickler(f, -1)
-            p.dump([data, self.__class__.CACHE_VERSION])
+        if have_data:
+            with open(self.cachefile, "wb") as f:
+                p = pickle.Pickler(f, -1)
+                p.dump([data, self.__class__.CACHE_VERSION])
 
         bb.utils.unlockfile(glf)
 
@@ -899,7 +957,7 @@ class SimpleCache(object):
         bb.utils.mkdirhier(cachedir)
         self.cachefile = os.path.join(cachedir,
                                       cache_file_name or self.__class__.cache_file_name)
-        logger.debug(1, "Using cache in '%s'", self.cachefile)
+        logger.debug("Using cache in '%s'", self.cachefile)
 
         glf = bb.utils.lockfile(self.cachefile + ".lock")
 
@@ -928,4 +986,12 @@ class SimpleCache(object):
             p = pickle.Pickler(f, -1)
             p.dump([data, self.cacheversion])
 
+        bb.utils.unlockfile(glf)
+
+    def copyfile(self, target):
+        if not self.cachefile:
+            return
+
+        glf = bb.utils.lockfile(self.cachefile + ".lock")
+        shutil.copy(self.cachefile, target)
         bb.utils.unlockfile(glf)

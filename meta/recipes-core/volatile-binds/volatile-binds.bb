@@ -16,10 +16,10 @@ inherit allarch systemd features_check
 REQUIRED_DISTRO_FEATURES = "systemd"
 
 VOLATILE_BINDS ?= "\
-    /var/volatile/lib /var/lib\n\
-    /var/volatile/cache /var/cache\n\
-    /var/volatile/spool /var/spool\n\
-    /var/volatile/srv /srv\n\
+    ${localstatedir}/volatile/lib ${localstatedir}/lib\n\
+    ${localstatedir}/volatile/cache ${localstatedir}/cache\n\
+    ${localstatedir}/volatile/spool ${localstatedir}/spool\n\
+    ${localstatedir}/volatile/srv /srv\n\
 "
 VOLATILE_BINDS[type] = "list"
 VOLATILE_BINDS[separator] = "\n"
@@ -33,9 +33,12 @@ def volatile_systemd_services(d):
         services.append("%s.service" % what[1:].replace("/", "-"))
     return " ".join(services)
 
-SYSTEMD_SERVICE_${PN} = "${@volatile_systemd_services(d)}"
+SYSTEMD_SERVICE:${PN} = "${@volatile_systemd_services(d)}"
 
-FILES_${PN} += "${systemd_unitdir}/system/*.service"
+FILES:${PN} += "${systemd_system_unitdir}/*.service ${servicedir}"
+
+# Set to 1 to forcibly skip OverlayFS, and default to copy+bind
+AVOID_OVERLAYFS = "0"
 
 do_compile () {
     while read spec mountpoint; do
@@ -43,37 +46,39 @@ do_compile () {
             continue
         fi
 
-        servicefile="${spec#/}"
-        servicefile="$(echo "$servicefile" | tr / -).service"
+        servicefile="$(echo "${spec#/}" | tr / -).service"
+        [ "$mountpoint" != ${localstatedir}/lib ] || var_lib_servicefile=$servicefile
         sed -e "s#@what@#$spec#g; s#@where@#$mountpoint#g" \
             -e "s#@whatparent@#${spec%/*}#g; s#@whereparent@#${mountpoint%/*}#g" \
+            -e "s#@avoid_overlayfs@#${@d.getVar('AVOID_OVERLAYFS')}#g" \
             volatile-binds.service.in >$servicefile
     done <<END
 ${@d.getVar('VOLATILE_BINDS').replace("\\n", "\n")}
 END
 
-    if [ -e var-volatile-lib.service ]; then
+    if [ -e "$var_lib_servicefile" ]; then
         # As the seed is stored under /var/lib, ensure that this service runs
         # after the volatile /var/lib is mounted.
         sed -i -e "/^Before=/s/\$/ systemd-random-seed.service/" \
                -e "/^WantedBy=/s/\$/ systemd-random-seed.service/" \
-               var-volatile-lib.service
+               "$var_lib_servicefile"
     fi
 }
 do_compile[dirs] = "${WORKDIR}"
 
 do_install () {
     install -d ${D}${base_sbindir}
+    install -d ${D}${servicedir}
     install -m 0755 mount-copybind ${D}${base_sbindir}/
 
-    install -d ${D}${systemd_unitdir}/system
-    for service in ${SYSTEMD_SERVICE_${PN}}; do
-        install -m 0644 $service ${D}${systemd_unitdir}/system/
+    install -d ${D}${systemd_system_unitdir}
+    for service in ${SYSTEMD_SERVICE:${PN}}; do
+        install -m 0644 $service ${D}${systemd_system_unitdir}/
     done
 
     # Suppress attempts to process some tmpfiles that are not temporary.
     #
-    install -d ${D}${sysconfdir}/tmpfiles.d ${D}/var/cache
+    install -d ${D}${sysconfdir}/tmpfiles.d ${D}${localstatedir}/cache
     ln -s /dev/null ${D}${sysconfdir}/tmpfiles.d/etc.conf
     ln -s /dev/null ${D}${sysconfdir}/tmpfiles.d/home.conf
 }

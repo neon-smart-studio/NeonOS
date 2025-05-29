@@ -1,5 +1,4 @@
 SUMMARY = "Python interface for Remember The Milk API"
-AUTHOR = "Sridhar Ratnakumar / srid"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://PKG-INFO;beginline=8;endline=8;md5=a53cbc7cb75660694e138ba973c148df"
 
@@ -12,25 +11,25 @@ inherit pypi setuptools3
 
 PACKAGES =+ "${PN}-tests ${PN}-samples"
 
-FILES_${PN}-samples += " \
+FILES:${PN}-samples += " \
     ${PYTHON_SITEPACKAGES_DIR}/rtm/samples \
 "
 
-FILES_${PN}-tests += " \
+FILES:${PN}-tests += " \
     ${PYTHON_SITEPACKAGES_DIR}/rtm/tests \
 "
 
-RDEPENDS_${PN} += "\
-    ${PYTHON_PN}-json \
-    ${PYTHON_PN}-logging \
-    ${PYTHON_PN}-netclient \
+RDEPENDS:${PN} += "\
+    python3-json \
+    python3-logging \
+    python3-netclient \
 "
 
-RDEPENDS_${PN}-samples += " \
+RDEPENDS:${PN}-samples += " \
     ${PN} \
 "
 
-RDEPENDS_${PN}-tests += " \
+RDEPENDS:${PN}-tests += " \
     ${PN} \
-    ${PYTHON_PN}-unittest \
+    python3-unittest \
 "

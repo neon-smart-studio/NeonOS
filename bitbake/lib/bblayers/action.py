@@ -1,4 +1,6 @@
 #
+# Copyright BitBake Contributors
+#
 # SPDX-License-Identifier: GPL-2.0-only
 #
 
@@ -9,6 +11,7 @@ import shutil
 import sys
 import tempfile
 
+from bb.cookerdata import findTopdir
 import bb.utils
 
 from bblayers.common import LayerPlugin
@@ -35,7 +38,7 @@ class ActionPlugin(LayerPlugin):
                 sys.stderr.write("Specified layer directory %s doesn't contain a conf/layer.conf file\n" % layerdir)
                 return 1
 
-        bblayers_conf = os.path.join('conf', 'bblayers.conf')
+        bblayers_conf = os.path.join(findTopdir(),'conf', 'bblayers.conf')
         if not os.path.exists(bblayers_conf):
             sys.stderr.write("Unable to find bblayers.conf\n")
             return 1
@@ -47,13 +50,15 @@ class ActionPlugin(LayerPlugin):
 
         try:
             notadded, _ = bb.utils.edit_bblayers_conf(bblayers_conf, layerdirs, None)
+            self.tinfoil.modified_files()
             if not (args.force or notadded):
                 try:
                     self.tinfoil.run_command('parseConfiguration')
                 except (bb.tinfoil.TinfoilUIException, bb.BBHandledException):
                     # Restore the back up copy of bblayers.conf
                     shutil.copy2(backup, bblayers_conf)
-                    bb.fatal("Parse failure with the specified layer added, aborting.")
+                    self.tinfoil.modified_files()
+                    bb.fatal("Parse failure with the specified layer added, exiting.")
                 else:
                     for item in notadded:
                         sys.stderr.write("Specified layer %s is already in BBLAYERS\n" % item)
@@ -63,7 +68,7 @@ class ActionPlugin(LayerPlugin):
 
     def do_remove_layer(self, args):
         """Remove one or more layers from bblayers.conf."""
-        bblayers_conf = os.path.join('conf', 'bblayers.conf')
+        bblayers_conf = os.path.join(findTopdir() ,'conf', 'bblayers.conf')
         if not os.path.exists(bblayers_conf):
             sys.stderr.write("Unable to find bblayers.conf\n")
             return 1
@@ -78,6 +83,7 @@ class ActionPlugin(LayerPlugin):
                 layerdir = os.path.abspath(item)
             layerdirs.append(layerdir)
         (_, notremoved) = bb.utils.edit_bblayers_conf(bblayers_conf, None, layerdirs)
+        self.tinfoil.modified_files()
         if notremoved:
             for item in notremoved:
                 sys.stderr.write("No layers matching %s found in BBLAYERS\n" % item)
@@ -143,11 +149,12 @@ build results (as the layer priority order has effectively changed).
 
         applied_appends = []
         for layer in layers:
-            overlayed = []
-            for f in self.tinfoil.cooker.collection.overlayed.keys():
-                for of in self.tinfoil.cooker.collection.overlayed[f]:
-                    if of.startswith(layer):
-                        overlayed.append(of)
+            overlayed = set()
+            for mc in self.tinfoil.cooker.multiconfigs:
+                for f in self.tinfoil.cooker.collections[mc].overlayed.keys():
+                    for of in self.tinfoil.cooker.collections[mc].overlayed[f]:
+                        if of.startswith(layer):
+                            overlayed.add(of)
 
             logger.plain('Copying files from %s...' % layer )
             for root, dirs, files in os.walk(layer):
@@ -174,14 +181,21 @@ build results (as the layer priority order has effectively changed).
                                     logger.warning('Overwriting file %s', fdest)
                             bb.utils.copyfile(f1full, fdest)
                             if ext == '.bb':
-                                for append in self.tinfoil.cooker.collection.get_file_appends(f1full):
+                                appends = set()
+                                for mc in self.tinfoil.cooker.multiconfigs:
+                                    appends |= set(self.tinfoil.cooker.collections[mc].get_file_appends(f1full))
+                                for append in appends:
                                     if layer_path_match(append):
                                         logger.plain('  Applying append %s to %s' % (append, fdest))
                                         self.apply_append(append, fdest)
                                         applied_appends.append(append)
 
         # Take care of when some layers are excluded and yet we have included bbappends for those recipes
-        for b in self.tinfoil.cooker.collection.bbappends:
+        bbappends = set()
+        for mc in self.tinfoil.cooker.multiconfigs:
+            bbappends |= set(self.tinfoil.cooker.collections[mc].bbappends)
+
+        for b in bbappends:
             (recipename, appendname) = b
             if appendname not in applied_appends:
                 first_append = None
@@ -228,6 +242,9 @@ build results (as the layer priority order has effectively changed).
                                     break
                             if not entry_found:
                                 logger.warning("File %s does not match the flattened layer's BBFILES setting, you may need to edit conf/layer.conf or move the file elsewhere" % f1full)
+
+        self.tinfoil.modified_files()
+
 
     def get_file_layer(self, filename):
         layerdir = self.get_file_layerdir(filename)

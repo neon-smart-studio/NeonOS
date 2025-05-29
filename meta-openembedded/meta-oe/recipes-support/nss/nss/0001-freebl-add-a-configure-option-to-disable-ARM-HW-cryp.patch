@@ -1,4 +1,4 @@
-From 5595e9651aca39af945931c73eb524a0f8bd130d Mon Sep 17 00:00:00 2001
+From 7c8f367faf8848a43a414079189e10270d6c0fcc Mon Sep 17 00:00:00 2001
 From: Alexander Kanavin <alex.kanavin@gmail.com>
 Date: Wed, 18 Dec 2019 12:29:50 +0100
 Subject: [PATCH] freebl: add a configure option to disable ARM HW crypto
@@ -8,33 +8,38 @@ prior to armv8 does not.
 
 Upstream-Status: Pending
 Signed-off-by: Alexander Kanavin <alex.kanavin@gmail.com>
+
 ---
  nss/lib/freebl/Makefile | 3 +++
- 1 file changed, 3 insertions(+)
+ nss/lib/freebl/gcm.c    | 2 ++
+ 2 files changed, 5 insertions(+)
 
+diff --git a/nss/lib/freebl/Makefile b/nss/lib/freebl/Makefile
+index 7ee8736..f9b4925 100644
 --- a/nss/lib/freebl/Makefile
 +++ b/nss/lib/freebl/Makefile
-@@ -125,6 +125,9 @@ else
-         DEFINES += -DNSS_X86
+@@ -142,6 +142,8 @@ endif
+         endif
+     endif
  endif
- endif
-+
 +ifdef NSS_USE_ARM_HW_CRYPTO
 +    DEFINES += -DNSS_USE_ARM_HW_CRYPTO
  ifeq ($(CPU_ARCH),aarch64)
-     DEFINES += -DUSE_HW_AES
-     EXTRA_SRCS += aes-armv8.c gcm-aarch64.c
-@@ -146,6 +149,7 @@ ifeq ($(CPU_ARCH),arm)
+     ifdef CC_IS_CLANG
+         DEFINES += -DUSE_HW_AES -DUSE_HW_SHA1 -DUSE_HW_SHA2
+@@ -183,6 +185,7 @@ endif
          endif
      endif
  endif
 +endif
  
- ifeq ($(OS_TARGET),OSF1)
-     DEFINES += -DMP_ASSEMBLY_MULTIPLY -DMP_NO_MP_WORD
+ ifeq (OS2,$(OS_TARGET))
+     ASFILES  = mpi_x86_os2.s
+diff --git a/nss/lib/freebl/gcm.c b/nss/lib/freebl/gcm.c
+index 2dae724..9ee7fc8 100644
 --- a/nss/lib/freebl/gcm.c
 +++ b/nss/lib/freebl/gcm.c
-@@ -17,6 +17,7 @@
+@@ -18,6 +18,7 @@
  
  #include <limits.h>
  
@@ -42,7 +47,7 @@ Signed-off-by: Alexander Kanavin <alex.kanavin@gmail.com>
  /* old gcc doesn't support some poly64x2_t intrinsic */
  #if defined(__aarch64__) && defined(IS_LITTLE_ENDIAN) && \
      (defined(__clang__) || defined(__GNUC__) && __GNUC__ > 6)
-@@ -25,6 +26,7 @@
+@@ -27,6 +28,7 @@
  /* We don't test on big endian platform, so disable this on big endian. */
  #define USE_ARM_GCM
  #endif

@@ -1,21 +1,23 @@
 DESCRIPTION = "This daemon is in charge of multiplexing connections over USB to an iPhone or iPod touch."
-LICENSE = "GPLv3 & GPLv2 & LGPLv2.1"
+HOMEPAGE = "https://github.com/libimobiledevice/usbmuxd"
+LICENSE = "GPL-3.0-only & GPL-2.0-only & LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING.GPLv2;md5=ebb5c50ab7cab4baeffba14977030c07 \
                     file://COPYING.GPLv3;md5=d32239bcb673463ab874e80d47fae504"
 
-DEPENDS = "udev libusb1 libplist"
+DEPENDS = "udev libusb1 libplist libimobiledevice-glue"
 
 inherit autotools pkgconfig gitpkgv systemd
 
 PKGV = "${GITPKGVTAG}"
+PV = "1.1.2+git"
 
-SRCREV = "ee85938c21043ef5f7cd4dfbc7677f385814d4d8"
+SRCREV = "01c94c77f59404924f1c46d99c4e5e0c7817281b"
 SRC_URI = "git://github.com/libimobiledevice/usbmuxd;protocol=https;branch=master"
 
 S = "${WORKDIR}/git"
 
 EXTRA_OECONF += "--without-preflight"
 
-FILES_${PN} += "${base_libdir}/udev/rules.d/"
+FILES:${PN} += "${base_libdir}/udev/rules.d/"
 
-SYSTEMD_SERVICE_${PN} = "usbmuxd.service"
+SYSTEMD_SERVICE:${PN} = "usbmuxd.service"

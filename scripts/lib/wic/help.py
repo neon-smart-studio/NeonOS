@@ -637,7 +637,7 @@ DESCRIPTION
     oe-core: directdisk.bbclass and mkefidisk.sh.  The difference
     between wic and those examples is that with wic the functionality
     of those scripts is implemented by a general-purpose partitioning
-    'language' based on Redhat kickstart syntax).
+    'language' based on Red Hat kickstart syntax).
 
     The initial motivation and design considerations that lead to the
     current tool are described exhaustively in Yocto Bug #3847
@@ -930,6 +930,7 @@ DESCRIPTION
              ext4
              btrfs
              squashfs
+             erofs
              swap
 
          --fsoptions: Specifies a free-form string of options to be
@@ -938,6 +939,12 @@ DESCRIPTION
                       installed system and should be enclosed in
                       quotes.  If not specified, the default string is
                       "defaults".
+
+         --fspassno: Specifies the order in which filesystem checks are done
+                     at boot time by fsck.  See fs_passno parameter of
+                     fstab(5).  This parameter will be copied into the
+                     /etc/fstab file of the installed system.  If not
+                     specified the default value of "0" will be used.
 
          --label label: Specifies the label to give to the filesystem
                         to be made on the partition. If the given
@@ -971,20 +978,27 @@ DESCRIPTION
                          has an effect with the rootfs source plugin.
 
          --include-path: This option is specific to wic. It adds the contents
-                         of the given path to the resulting image. The path is
-                         relative to the directory in which wic is running not
-                         the rootfs itself so use of an absolute path is
-                         recommended. This option is most useful when multiple
-                         copies of the rootfs are added to an image and it is
-                         required to add extra content to only one of these
-                         copies. This option only has an effect with the rootfs
-                         source plugin.
+                         of the given path or a rootfs to the resulting image.
+                         The option contains two fields, the origin and the
+                         destination. When the origin is a rootfs, it follows
+                         the same logic as the rootfs-dir argument and the
+                         permissions and owners are kept. When the origin is a
+                         path, it is relative to the directory in which wic is
+                         running not the rootfs itself so use of an absolute
+                         path is recommended, and the owner and group is set to
+                         root:root. If no destination is given it is
+                         automatically set to the root of the rootfs. This
+                         option only has an effect with the rootfs source
+                         plugin.
 
          --change-directory: This option is specific to wic. It changes to the
                              given directory before copying the files. This
                              option is useful when we want to split a rootfs in
                              multiple partitions and we want to keep the right
                              permissions and usernames in all the partitions.
+
+         --no-fstab-update: This option is specific to wic. It does not update the
+                            '/etc/fstab' stock file for the given partition.
 
          --extra-space: This option is specific to wic. It adds extra
                         space after the space filled by the content
@@ -1104,7 +1118,7 @@ COMMAND:
 TOPIC:
     overview  - Presents an overall overview of Wic
     plugins   - Presents an overview and API for Wic plugins
-    kickstart - Presents a Wic kicstart file reference
+    kickstart - Presents a Wic kickstart file reference
 
 
 Examples:

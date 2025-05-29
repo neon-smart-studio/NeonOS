@@ -1,10 +1,11 @@
 #
+# Copyright OpenEmbedded Contributors
+#
 # SPDX-License-Identifier: MIT
 #
 
 from oeqa.selftest.case import OESelftestTestCase
 from oeqa.utils.commands import bitbake, get_bb_vars, get_bb_var, runqemu
-import stat
 import subprocess, os
 import oe.path
 import re
@@ -88,6 +89,13 @@ class VersionOrdering(OESelftestTestCase):
             self.assertEqual(status - 100, sort, "%s %s (%d) failed" % (ver1, ver2, sort))
 
 class PackageTests(OESelftestTestCase):
+    # Verify that a recipe cannot rename a package into an existing one
+    def test_package_name_conflict(self):
+        res = bitbake("packagenameconflict", ignore_status=True)
+        self.assertNotEqual(res.status, 0)
+        err = "package name already exists"
+        self.assertTrue(err in res.output)
+
     # Verify that a recipe which sets up hardlink files has those preserved into split packages
     # Also test file sparseness is preserved
     def test_preserve_sparse_hardlinks(self):
@@ -95,11 +103,37 @@ class PackageTests(OESelftestTestCase):
 
         dest = get_bb_var('PKGDEST', 'selftest-hardlink')
         bindir = get_bb_var('bindir', 'selftest-hardlink')
+        libdir = get_bb_var('libdir', 'selftest-hardlink')
+        libexecdir = get_bb_var('libexecdir', 'selftest-hardlink')
 
         def checkfiles():
             # Recipe creates 4 hardlinked files, there is a copy in package/ and a copy in packages-split/
             # so expect 8 in total.
             self.assertEqual(os.stat(dest + "/selftest-hardlink" + bindir + "/hello1").st_nlink, 8)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink" + libexecdir + "/hello3").st_nlink, 8)
+
+            # Check dbg version
+            # 2 items, a copy in both package/packages-split so 4
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + bindir + "/.debug/hello1").st_nlink, 4)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + libexecdir + "/.debug/hello1").st_nlink, 4)
+
+            # Even though the libexecdir name is 'hello3' or 'hello4', that isn't the debug target name
+            self.assertEqual(os.path.exists(dest + "/selftest-hardlink-dbg" + libexecdir + "/.debug/hello3"), False)
+            self.assertEqual(os.path.exists(dest + "/selftest-hardlink-dbg" + libexecdir + "/.debug/hello4"), False)
+
+            # Check the staticdev libraries
+            # 101 items, a copy in both package/packages-split so 202
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-staticdev" + libdir + "/libhello.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-staticdev" + libdir + "/libhello-25.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-staticdev" + libdir + "/libhello-50.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-staticdev" + libdir + "/libhello-75.a").st_nlink, 202)
+
+            # Check static dbg
+            # 101 items, a copy in both package/packages-split so 202
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + libdir + "/.debug-static/libhello.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + libdir + "/.debug-static/libhello-25.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + libdir + "/.debug-static/libhello-50.a").st_nlink, 202)
+            self.assertEqual(os.stat(dest + "/selftest-hardlink-dbg" + libdir + "/.debug-static/libhello-75.a").st_nlink, 202)
 
             # Test a sparse file remains sparse
             sparsestat = os.stat(dest + "/selftest-hardlink" + bindir + "/sparsetest")
@@ -116,9 +150,9 @@ class PackageTests(OESelftestTestCase):
 
     # Verify gdb to read symbols from separated debug hardlink file correctly
     def test_gdb_hardlink_debug(self):
-        features = 'IMAGE_INSTALL_append = " selftest-hardlink"\n'
-        features += 'IMAGE_INSTALL_append = " selftest-hardlink-dbg"\n'
-        features += 'IMAGE_INSTALL_append = " selftest-hardlink-gdb"\n'
+        features = 'IMAGE_INSTALL:append = " selftest-hardlink"\n'
+        features += 'IMAGE_INSTALL:append = " selftest-hardlink-dbg"\n'
+        features += 'IMAGE_INSTALL:append = " selftest-hardlink-gdb"\n'
         self.write_config(features)
         bitbake("core-image-minimal")
 
@@ -134,8 +168,10 @@ class PackageTests(OESelftestTestCase):
                     self.logger.error("No debugging symbols found. GDB result:\n%s" % output)
                     return False
 
-                # Check debugging symbols works correctly
-                elif re.match(r"Breakpoint 1.*hello\.c.*4", l):
+                # Check debugging symbols works correctly. Don't look for a
+                # source file as optimisation can put the breakpoint inside
+                # stdio.h.
+                elif "Breakpoint 1 at" in l:
                     return True
 
             self.logger.error("GDB result:\n%d: %s", status, output)
@@ -148,3 +184,27 @@ class PackageTests(OESelftestTestCase):
                            '/usr/libexec/hello4']:
                 if not gdbtest(qemu, binary):
                     self.fail('GDB %s failed' % binary)
+
+    def test_preserve_ownership(self):
+        features = 'IMAGE_INSTALL:append = " selftest-chown"\n'
+        self.write_config(features)
+        bitbake("core-image-minimal")
+
+        def check_ownership(qemu, expected_gid, expected_uid, path):
+            self.logger.info("Check ownership of %s", path)
+            status, output = qemu.run_serial('stat -c "%U %G" ' + path)
+            self.assertEqual(status, 1, "stat failed: " + output)
+            try:
+                uid, gid = output.split()
+                self.assertEqual(uid, expected_uid)
+                self.assertEqual(gid, expected_gid)
+            except ValueError:
+                self.fail("Cannot parse output: " + output)
+
+        sysconfdir = get_bb_var('sysconfdir', 'selftest-chown')
+        with runqemu('core-image-minimal') as qemu:
+            for path in [ sysconfdir + "/selftest-chown/file",
+                          sysconfdir + "/selftest-chown/dir",
+                          sysconfdir + "/selftest-chown/symlink",
+                          sysconfdir + "/selftest-chown/fifotest/fifo"]:
+                check_ownership(qemu, "test", "test", path)

@@ -1,4 +1,6 @@
 #
+# Copyright OpenEmbedded Contributors
+#
 # SPDX-License-Identifier: MIT
 #
 
@@ -114,17 +116,22 @@ class SyslogTestConfig(OERuntimeTestCase):
     @OETestDepends(['oe_syslog.SyslogTestConfig.test_syslog_logger'])
     @OEHasPackage(["busybox-syslog"])
     @skipIfDataVar('VIRTUAL-RUNTIME_init_manager', 'systemd',
-                   'Not appropiate for systemd image')
+                   'Not appropriate for systemd image')
     def test_syslog_startup_config(self):
         cmd = 'echo "LOGFILE=/var/log/test" >> /etc/syslog-startup.conf'
         self.target.run(cmd)
 
         self.test_syslog_restart()
 
-        cmd = 'logger foobar && grep foobar /var/log/test'
-        status,output = self.target.run(cmd)
-        msg = 'Test log string not found. Output: %s ' % output
+        cmd = 'logger foobar'
+        status, output = self.target.run(cmd)
+        msg = 'Logger command failed, %s. Output: %s ' % (status, output)
         self.assertEqual(status, 0, msg=msg)
+
+        cmd = 'cat /var/log/test'
+        status, output = self.target.run(cmd)
+        if "foobar" not in output or status:
+            self.fail("'foobar' not found in logfile, status %s, contents %s" % (status, output))
 
         cmd = "sed -i 's#LOGFILE=/var/log/test##' /etc/syslog-startup.conf"
         self.target.run(cmd)

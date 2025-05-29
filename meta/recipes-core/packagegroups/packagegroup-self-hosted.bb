@@ -4,7 +4,6 @@
 
 SUMMARY = "Self-hosting"
 DESCRIPTION = "Packages required to run the build system"
-PR = "r13"
 
 PACKAGE_ARCH = "${TUNE_PKGARCH}"
 
@@ -24,7 +23,7 @@ PACKAGES = "\
     packagegroup-self-hosted-host-tools \
     "
 
-RDEPENDS_packagegroup-self-hosted = "\
+RDEPENDS:packagegroup-self-hosted = "\
     packagegroup-self-hosted-debug \
     packagegroup-self-hosted-sdk \
     packagegroup-self-hosted-extended \
@@ -32,7 +31,7 @@ RDEPENDS_packagegroup-self-hosted = "\
     packagegroup-self-hosted-host-tools \
     "
 
-RDEPENDS_packagegroup-self-hosted-host-tools = "\
+RDEPENDS:packagegroup-self-hosted-host-tools = "\
     e2fsprogs \
     e2fsprogs-e2fsck \
     e2fsprogs-mke2fs \
@@ -41,7 +40,7 @@ RDEPENDS_packagegroup-self-hosted-host-tools = "\
     iptables \
     lsb-release \
     mc \
-    mc-fish \
+    mc-shell \
     mc-helpers \
     mc-helpers-perl \
     parted \
@@ -49,9 +48,9 @@ RDEPENDS_packagegroup-self-hosted-host-tools = "\
     screen \
     "
 PSEUDO = "pseudo"
-PSEUDO_libc-musl = ""
+PSEUDO:libc-musl = ""
 
-RRECOMMENDS_packagegroup-self-hosted-host-tools = "\
+RRECOMMENDS:packagegroup-self-hosted-host-tools = "\
     kernel-module-tun \
     kernel-module-iptable-raw \
     kernel-module-iptable-nat \
@@ -59,7 +58,7 @@ RRECOMMENDS_packagegroup-self-hosted-host-tools = "\
     kernel-module-iptable-filter \
 	"
 
-RDEPENDS_packagegroup-self-hosted-sdk = "\
+RDEPENDS:packagegroup-self-hosted-sdk = "\
     autoconf \
     automake \
     binutils \
@@ -87,26 +86,29 @@ RDEPENDS_packagegroup-self-hosted-sdk = "\
     quilt \
     sed \
     "
-RDEPENDS_packagegroup-self-hosted-sdk_append_mingw32 = "\
+RDEPENDS:packagegroup-self-hosted-sdk:append:mingw32 = "\
     libssp \
     libssp-dev \
     libssp-staticdev \
     "
 # rpcsvc-proto: for rpcgen
-RDEPENDS_packagegroup-self-hosted-sdk_append_libc-glibc = "\
+RDEPENDS:packagegroup-self-hosted-sdk:append:libc-glibc = "\
     glibc-gconv-ibm850 \
     glibc-utils \
     rpcsvc-proto \
     "
-RDEPENDS_packagegroup-self-hosted-debug = " \
+
+STRACE = "strace"
+STRACE:riscv32 = ""
+RDEPENDS:packagegroup-self-hosted-debug = " \
     gdb \
     gdbserver \
     rsync \
-    strace \
+    ${STRACE} \
     tcf-agent"
 
 
-RDEPENDS_packagegroup-self-hosted-extended = "\
+RDEPENDS:packagegroup-self-hosted-extended = "\
     bzip2 \
     chrpath \
     cpio \
@@ -124,12 +126,10 @@ RDEPENDS_packagegroup-self-hosted-extended = "\
     grep \
     groff \
     gzip \
-    settings-daemon \
     libaio \
     libusb1 \
     libxml2 \
     lsof \
-    lzo \
     man \
     man-pages \
     mdadm \
@@ -158,6 +158,7 @@ RDEPENDS_packagegroup-self-hosted-extended = "\
     readline \
     rpm \
     setserial \
+    settings-daemon \
     socat \
     subversion \
     sudo \
@@ -171,22 +172,23 @@ RDEPENDS_packagegroup-self-hosted-extended = "\
     wget \
     which \
     xinetd \
+    xz \
     zip \
     zlib \
-    xz \
+    zstd \
     "
 
 
-RDEPENDS_packagegroup-self-hosted-graphics = "\
+RDEPENDS:packagegroup-self-hosted-graphics = "\
+    adwaita-icon-theme \
     builder \
+    l3afpad \
     libgl \
     libgl-dev \
     libglu \
     libglu-dev \
     libx11-dev \
-    adwaita-icon-theme \
-    xdg-utils \
-    l3afpad \
     pcmanfm \
     vte \
+    xdg-utils \
     "
