@@ -25,7 +25,7 @@ PITFT28c="${@bb.utils.contains("MACHINE_FEATURES", "pitft28c", "1", "0", d)}"
 PITFT35r="${@bb.utils.contains("MACHINE_FEATURES", "pitft35r", "1", "0", d)}"
 
 VC4GRAPHICS="${@bb.utils.contains("MACHINE_FEATURES", "vc4graphics", "1", "0", d)}"
-VC4DTBO ?= "vc4-kms-v3d"
+VC4DTBO ?= "vc4-fkms-v3d"
 GPIO_IR ?= "18"
 GPIO_IR_TX ?= "17"
 
