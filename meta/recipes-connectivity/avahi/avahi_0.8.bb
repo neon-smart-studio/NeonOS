@@ -78,6 +78,13 @@ EXTRA_OECONF_SYSVINIT = "${@bb.utils.contains('DISTRO_FEATURES','sysvinit','--wi
 EXTRA_OECONF_SYSTEMD = "${@bb.utils.contains('DISTRO_FEATURES','systemd','--with-systemdsystemunitdir=${systemd_system_unitdir}/','--without-systemdsystemunitdir',d)}"
 
 do_configure:prepend() {
+    export GI_SCANNER_DISABLE_CACHE=1
+    export GIR_EXTRA_LIBS_PATH="${B}/avahi-gobject/.libs:${B}/avahi-common/.libs:${B}/avahi-client/.libs:${B}/avahi-glib/.libs"
+    export GI_SCANNER_EXTRA_ARGS="--library-path=${B}/avahi-gobject/.libs \
+                                  --library-path=${B}/avahi-common/.libs \
+                                  --library-path=${B}/avahi-client/.libs \
+                                  --library-path=${B}/avahi-glib/.libs"
+    export LD_LIBRARY_PATH="${GIR_EXTRA_LIBS_PATH}:${LD_LIBRARY_PATH}"
     # This m4 file will get in the way of our introspection.m4 with special cross-compilation fixes
     rm "${S}/common/introspection.m4" || true
 }

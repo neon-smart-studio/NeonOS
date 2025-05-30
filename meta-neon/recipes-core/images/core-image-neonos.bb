@@ -17,6 +17,7 @@ IMAGE_INSTALL += " \
     sudo \
     htop \
     iw \
+    webmin \
     nodejs \
 "
 
